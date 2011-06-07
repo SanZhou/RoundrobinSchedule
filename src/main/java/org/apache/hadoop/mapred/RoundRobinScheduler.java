@@ -59,17 +59,11 @@ public class RoundRobinScheduler extends TaskScheduler {
 				if (job != null) {
 					SERVICE.execute(new Runnable() {
 						public void run() {
-							try {
-								job.initTasks();
-								RoundRobinScheduler.this.jobs.put(job, job);
-							} catch (KillInterruptedException e) {
-								LOGGER.error(e);
-							} catch (IOException e) {
-								LOGGER.error(e);
-							}
+							taskTrackerManager.initJob(job);
+							RoundRobinScheduler.this.jobs.put(job, job);
 						}
 					});
-				
+
 				}
 			}
 		});
