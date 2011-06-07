@@ -60,6 +60,12 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 */
 	@Override
 	public List<Task> assignTasks(TaskTrackerStatus status) throws IOException {
+		Iterator<Entry<JobInProgress, JobInProgress>> round_robin = this.jobs.entrySet().iterator();
+		// nothing to do
+		if (!round_robin.hasNext()) {
+			return new ArrayList<Task>(0);
+		}
+
 		RoundRobinScheduler.LOGGER.info("assign tasks for " + status);
 		final List<Task> assigned = new ArrayList<Task>();
 		final int task_tracker = this.taskTrackerManager.getClusterStatus().getTaskTrackers();
@@ -67,32 +73,45 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 		// assign map task
 		int map_capacity = status.getMaxMapTasks() - status.countMapTasks();
+
+		// ensure not empty
 		while (map_capacity > 0) {
-			Iterator<Entry<JobInProgress, JobInProgress>> round_roubin = this.jobs.entrySet().iterator();
-			while (round_roubin.hasNext() && map_capacity > 0) {
-				JobInProgress job = round_roubin.next().getValue();
-				if (job.getStatus().getRunState() == JobStatus.RUNNING) {
-					Task task = job.obtainNewMapTask(status, task_tracker, uniq_hosts);
-					if (task == null) {
-						assigned.add(task);
-						map_capacity--;
-					}
+			// test if need round robin
+			if (!round_robin.hasNext() && !(round_robin = this.jobs.entrySet().iterator()).hasNext()) {
+				break;
+			}
+
+			// iterate it
+			JobInProgress job = round_robin.next().getValue();
+			if (job.getStatus().getRunState() == JobStatus.RUNNING) {
+				Task task = job.obtainNewMapTask(status, task_tracker, uniq_hosts);
+				if (task != null) {
+					assigned.add(task);
+					map_capacity--;
+				} else {
+					break;
 				}
 			}
+
 		}
 
 		// assign reduce task
 		int reduce_capacity = status.getMaxMapTasks() - status.countMapTasks();
 		while (reduce_capacity > 0) {
-			Iterator<Entry<JobInProgress, JobInProgress>> round_roubin = this.jobs.entrySet().iterator();
-			while (round_roubin.hasNext() && reduce_capacity > 0) {
-				JobInProgress job = round_roubin.next().getValue();
-				if (job.getStatus().getRunState() == JobStatus.RUNNING) {
-					Task task = job.obtainNewReduceTask(status, task_tracker, uniq_hosts);
-					if (task != null) {
-						assigned.add(task);
-						reduce_capacity--;
-					}
+			// test if need round robin
+			if (!round_robin.hasNext() && !(round_robin = this.jobs.entrySet().iterator()).hasNext()) {
+				break;
+			}
+
+			// iterate it
+			JobInProgress job = round_robin.next().getValue();
+			if (job.getStatus().getRunState() == JobStatus.RUNNING) {
+				Task task = job.obtainNewReduceTask(status, task_tracker, uniq_hosts);
+				if (task != null) {
+					assigned.add(task);
+					map_capacity--;
+				} else {
+					break;
 				}
 			}
 		}
