@@ -3,6 +3,7 @@ package org.apache.hadoop.mapred;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 	private Map<JobInProgress, JobInProgress> jobs = new ConcurrentHashMap<JobInProgress, JobInProgress>();
 
+	private int tracker;
+
 	/**
 	 * {@inheritDoc}
 	 * 
@@ -38,6 +41,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public void start() throws IOException {
 		super.start();
+		this.tracker = 0;
 		RoundRobinScheduler.LOGGER.info("start round robin scheduler");
 		this.taskTrackerManager.addJobInProgressListener(new JobInProgressListener() {
 			@Override
@@ -55,13 +59,12 @@ public class RoundRobinScheduler extends TaskScheduler {
 			public void jobAdded(final JobInProgress job) throws IOException {
 				RoundRobinScheduler.LOGGER.info("add job	" + job);
 				if (job != null) {
-					SERVICE.execute(new Runnable() {
+					RoundRobinScheduler.SERVICE.execute(new Runnable() {
 						public void run() {
-							taskTrackerManager.initJob(job);
+							RoundRobinScheduler.this.taskTrackerManager.initJob(job);
 							RoundRobinScheduler.this.jobs.put(job, job);
 						}
 					});
-
 				}
 			}
 		});
@@ -87,6 +90,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}
 		}
 
+		// shuffle the jobs, avoid starvation
+		Collections.shuffle(in_progress);
+
 		// no runnning job
 		if (in_progress.size() <= 0) {
 			return new ArrayList<Task>(0);
@@ -101,40 +107,38 @@ public class RoundRobinScheduler extends TaskScheduler {
 		int map_capacity = status.getMaxMapTasks() - status.countMapTasks();
 
 		// ensure not empty
-		int tracker = 0;
 		while (map_capacity > 0) {
-			LOGGER.info("map capacity:" + map_capacity);
+			RoundRobinScheduler.LOGGER.info("map capacity:" + map_capacity);
 
 			// iterate it
-			tracker = ++tracker % in_progress.size();
-			JobInProgress job = in_progress.get(tracker);
+			this.tracker = ++this.tracker % in_progress.size();
+			JobInProgress job = in_progress.get(this.tracker);
 			Task task = job.obtainNewMapTask(status, task_tracker, uniq_hosts);
 			if (task != null) {
-				LOGGER.info("add a map task:" + task);
+				RoundRobinScheduler.LOGGER.info("add a map task:" + task);
 				assigned.add(task);
 				map_capacity--;
 			} else {
-				LOGGER.info("no map capactiy remaind");
+				RoundRobinScheduler.LOGGER.info("no map task for node");
 				break;
 			}
 		}
 
 		// assign reduce task
 		int reduce_capacity = status.getMaxMapTasks() - status.countMapTasks();
-		tracker = 0;
 		while (reduce_capacity > 0) {
-			LOGGER.info("reduce capacity:" + map_capacity);
+			RoundRobinScheduler.LOGGER.info("reduce capacity:" + map_capacity);
 
 			// iterate it
-			tracker = ++tracker % in_progress.size();
-			JobInProgress job = in_progress.get(tracker);
+			this.tracker = ++this.tracker % in_progress.size();
+			JobInProgress job = in_progress.get(this.tracker);
 			Task task = job.obtainNewReduceTask(status, task_tracker, uniq_hosts);
 			if (task != null) {
-				LOGGER.info("add a reduce task:" + task);
+				RoundRobinScheduler.LOGGER.info("add a reduce task:" + task);
 				assigned.add(task);
 				reduce_capacity--;
 			} else {
-				LOGGER.info("no reduce capactiy remaind");
+				RoundRobinScheduler.LOGGER.info("no reduce task for node");
 				break;
 			}
 		}
@@ -145,7 +149,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 	@Override
 	public Collection<JobInProgress> getJobs(String identity) {
-		RoundRobinScheduler.LOGGER.info("get jobs");
 		return new CopyOnWriteArraySet<JobInProgress>(this.jobs.keySet());
 	}
 }
