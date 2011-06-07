@@ -76,8 +76,10 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 		// ensure not empty
 		while (map_capacity > 0) {
+			LOGGER.info("map capacity:" + map_capacity);
 			// test if need round robin
 			if (!round_robin.hasNext() && !(round_robin = this.jobs.entrySet().iterator()).hasNext()) {
+				LOGGER.info("no jobs of map");
 				break;
 			}
 
@@ -86,20 +88,23 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (job.getStatus().getRunState() == JobStatus.RUNNING) {
 				Task task = job.obtainNewMapTask(status, task_tracker, uniq_hosts);
 				if (task != null) {
+					LOGGER.info("add a matask:" + task);
 					assigned.add(task);
 					map_capacity--;
 				} else {
+					LOGGER.info("no map capactiy remaind");
 					break;
 				}
 			}
-
 		}
 
 		// assign reduce task
 		int reduce_capacity = status.getMaxMapTasks() - status.countMapTasks();
 		while (reduce_capacity > 0) {
+			LOGGER.info("map capacity:" + reduce_capacity);
 			// test if need round robin
 			if (!round_robin.hasNext() && !(round_robin = this.jobs.entrySet().iterator()).hasNext()) {
+				LOGGER.info("no jobs of reudce");
 				break;
 			}
 
@@ -108,9 +113,11 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (job.getStatus().getRunState() == JobStatus.RUNNING) {
 				Task task = job.obtainNewReduceTask(status, task_tracker, uniq_hosts);
 				if (task != null) {
+					LOGGER.info("add a reduce task:" + task);
 					assigned.add(task);
-					map_capacity--;
+					reduce_capacity--;
 				} else {
+					LOGGER.info("no reduce capactiy remaind");
 					break;
 				}
 			}
