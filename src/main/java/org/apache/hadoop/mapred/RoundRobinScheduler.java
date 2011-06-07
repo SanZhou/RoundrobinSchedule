@@ -85,6 +85,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 			// iterate it
 			JobInProgress job = round_robin.next().getValue();
+			LOGGER.info("job:" + job + " status:" + job.getStatus().getRunState() );
 			if (job.getStatus().getRunState() == JobStatus.RUNNING) {
 				Task task = job.obtainNewMapTask(status, task_tracker, uniq_hosts);
 				if (task != null) {
