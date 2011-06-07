@@ -9,9 +9,15 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.mapred.JobInProgress.KillInterruptedException;
 
 /**
  * assign task in round robin fashion
@@ -21,6 +27,8 @@ import org.apache.commons.logging.LogFactory;
 public class RoundRobinScheduler extends TaskScheduler {
 
 	private static final Log LOGGER = LogFactory.getLog(RoundRobinScheduler.class);
+	private static ExecutorService SERVICE = new ThreadPoolExecutor(0, Short.MAX_VALUE, 10, TimeUnit.SECONDS,
+			new LinkedBlockingQueue<Runnable>());
 
 	private Map<JobInProgress, JobInProgress> jobs = new ConcurrentHashMap<JobInProgress, JobInProgress>();
 
@@ -85,7 +93,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 			// iterate it
 			JobInProgress job = round_robin.next().getValue();
-			LOGGER.info("job:" + job + " status:" + job.getStatus().getRunState() );
+			LOGGER.info("job:" + job + " status:" + job.getStatus().getRunState());
 			if (job.getStatus().getRunState() == JobStatus.RUNNING) {
 				Task task = job.obtainNewMapTask(status, task_tracker, uniq_hosts);
 				if (task != null) {
