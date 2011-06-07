@@ -54,10 +54,22 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}
 
 			@Override
-			public void jobAdded(JobInProgress job) throws IOException {
+			public void jobAdded(final JobInProgress job) throws IOException {
 				RoundRobinScheduler.LOGGER.info("add job	" + job);
 				if (job != null) {
-					RoundRobinScheduler.this.jobs.put(job, job);
+					SERVICE.execute(new Runnable() {
+						public void run() {
+							try {
+								job.initTasks();
+								RoundRobinScheduler.this.jobs.put(job, job);
+							} catch (KillInterruptedException e) {
+								LOGGER.error(e);
+							} catch (IOException e) {
+								LOGGER.error(e);
+							}
+						}
+					});
+				
 				}
 			}
 		});
