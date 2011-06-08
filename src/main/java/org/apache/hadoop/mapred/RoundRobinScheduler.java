@@ -125,7 +125,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		}
 
 		// assign reduce task
-		int reduce_capacity = status.getMaxMapTasks() - status.countMapTasks();
+		int reduce_capacity = status.getMaxReduceTasks() - status.countReduceTasks();
 		while (reduce_capacity > 0) {
 			RoundRobinScheduler.LOGGER.info("reduce capacity:" + map_capacity);
 
