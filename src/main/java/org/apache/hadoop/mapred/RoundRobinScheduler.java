@@ -3,7 +3,6 @@ package org.apache.hadoop.mapred;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -62,7 +61,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 					@Override
 					public void jobAdded(final JobInProgress job)
 							throws IOException {
-						RoundRobinScheduler.LOGGER.info("add job	" + job);
+						RoundRobinScheduler.LOGGER.info("add job " + job);
 						if (job != null) {
 							RoundRobinScheduler.SERVICE.execute(new Runnable() {
 								public void run() {
@@ -82,8 +81,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public List<Task> assignTasks(TaskTrackerStatus status) throws IOException {
 		// take a snapshot
-		Iterator<Entry<JobInProgress, JobInProgress>> round_robin = new HashMap<JobInProgress, JobInProgress>(
-				this.jobs).entrySet().iterator();
+		Iterator<Entry<JobInProgress, JobInProgress>> round_robin = this.jobs
+				.entrySet().iterator();
 
 		// nothing to do
 		if (!round_robin.hasNext()) {
