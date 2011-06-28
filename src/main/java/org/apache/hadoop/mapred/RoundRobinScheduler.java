@@ -102,7 +102,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			return new ArrayList<Task>(0);
 		}
 
-		RoundRobinScheduler.LOGGER.info("assign tasks for " + status);
+		RoundRobinScheduler.LOGGER.info("assign tasks for " + status.getTrackerName());
 		final List<Task> assigned = new ArrayList<Task>();
 		final int task_tracker = this.taskTrackerManager.getClusterStatus()
 				.getTaskTrackers();
