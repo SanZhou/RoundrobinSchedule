@@ -114,6 +114,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 		// assign map task
 		int map_capacity = status.getMaxMapTasks() - status.countMapTasks();
 
+		// leave a chance to live
+		boolean stop = false;
+
 		// ensure not empty
 		while (map_capacity > 0) {
 			// iterate it
@@ -123,11 +126,15 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (task != null) {
 				assigned.add(task);
 				map_capacity--;
-			} else {
+				stop = false;
+			} else if (stop) {
 				break;
+			} else {
+				stop = true;
 			}
 		}
 
+		stop = false;
 		// assign reduce task
 		int reduce_capacity = status.getMaxReduceTasks()
 				- status.countReduceTasks();
@@ -139,8 +146,11 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (task != null) {
 				assigned.add(task);
 				reduce_capacity--;
-			} else {
+				stop = false;
+			} else if (stop) {
 				break;
+			} else {
+				stop = true;
 			}
 		}
 
