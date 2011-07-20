@@ -203,9 +203,16 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}
 		}
 
-		RoundRobinScheduler.LOGGER.info("assigned task:" + assigned.size()
-				+ " map_capacity:" + map_capacity + " reduce_capacity:"
-				+ reduce_capacity);
+		if (assigned != null) {
+			RoundRobinScheduler.LOGGER.info("assigned task:" + assigned.size()
+					+ " map_capacity:" + map_capacity + " reduce_capacity:"
+					+ reduce_capacity);
+		} else {
+			RoundRobinScheduler.LOGGER.info("assigned task:" + 0
+					+ " map_capacity:" + map_capacity + " reduce_capacity:"
+					+ reduce_capacity);
+		}
+
 		return assigned;
 	}
 
