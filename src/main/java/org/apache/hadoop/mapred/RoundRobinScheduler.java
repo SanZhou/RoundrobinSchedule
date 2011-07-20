@@ -130,18 +130,16 @@ public class RoundRobinScheduler extends TaskScheduler {
 		final Iterator<Entry<JobInProgress, JobInProgress>> round_robin = this.jobs
 				.entrySet().iterator();
 
-		// nothing to do
-		if (!round_robin.hasNext()) {
-			return EMPTY_ASSIGNED;
-		}
-
 		// get jobs
-		final List<JobInProgress> in_progress = GCNice
-				.make(new ArrayList<JobInProgress>());
+		List<JobInProgress> in_progress = null;
 		while (round_robin.hasNext()) {
 			JobInProgress job = round_robin.next().getKey();
 			if (job != null
 					&& job.getStatus().getRunState() == JobStatus.RUNNING) {
+				if (in_progress == null) {
+					// lazy initialize
+					in_progress = GCNice.make(new ArrayList<JobInProgress>());
+				}
 				in_progress.add(job);
 			}
 		}
@@ -153,10 +151,10 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 		RoundRobinScheduler.LOGGER.info("assign tasks for "
 				+ status.getTrackerName());
-		final List<Task> assigned = GCNice.make(new ArrayList<Task>());
-		final int task_tracker = this.taskTrackerManager.getClusterStatus()
+		List<Task> assigned = null;
+		int task_tracker = this.taskTrackerManager.getClusterStatus()
 				.getTaskTrackers();
-		final int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
+		int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
 
 		// assign map task
 		int map_capacity = status.getMaxMapTasks() - status.countMapTasks();
@@ -171,6 +169,10 @@ public class RoundRobinScheduler extends TaskScheduler {
 			Task task = in_progress.get(this.tracker).obtainNewMapTask(status,
 					task_tracker, uniq_hosts);
 			if (task != null) {
+				if (assigned == null) {
+					// lazy initialize
+					assigned = GCNice.make(new ArrayList<Task>());
+				}
 				assigned.add(GCNice.make(task));
 				map_capacity--;
 			} else {
@@ -178,7 +180,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}
 		}
 
+		// reset flag
 		stop = in_progress.size();
+
 		// assign reduce task
 		int reduce_capacity = status.getMaxReduceTasks()
 				- status.countReduceTasks();
@@ -188,6 +192,10 @@ public class RoundRobinScheduler extends TaskScheduler {
 			Task task = in_progress.get(this.tracker).obtainNewReduceTask(
 					status, task_tracker, uniq_hosts);
 			if (task != null) {
+				if (assigned == null) {
+					// lazy initialize
+					assigned = GCNice.make(new ArrayList<Task>());
+				}
 				assigned.add(GCNice.make(task));
 				reduce_capacity--;
 			} else {
