@@ -145,7 +145,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		}
 
 		// no runnning job
-		if (in_progress.size() <= 0) {
+		if (in_progress == null) {
 			return EMPTY_ASSIGNED;
 		}
 
