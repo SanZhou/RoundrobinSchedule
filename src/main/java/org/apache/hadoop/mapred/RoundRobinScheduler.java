@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.mapreduce.JobID;
 
 /**
  * assign task in round robin fashion
@@ -76,7 +77,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		}
 	}
 
-	private Map<JobInProgress, JobInProgress> jobs = new ConcurrentHashMap<JobInProgress, JobInProgress>();
+	private Map<JobID, JobInProgress> jobs = new ConcurrentHashMap<JobID, JobInProgress>();
 
 	private int tracker;
 
@@ -96,12 +97,27 @@ public class RoundRobinScheduler extends TaskScheduler {
 					public void jobUpdated(JobChangeEvent event) {
 						RoundRobinScheduler.LOGGER
 								.info("get an event:" + event);
+						if (event instanceof JobStatusChangeEvent) {
+							// job status change,should check here if need to
+							// remove job from job set in progress
+							JobStatusChangeEvent status = (JobStatusChangeEvent) event;
+							if (status.getEventType() == JobStatusChangeEvent.EventType.RUN_STATE_CHANGED) {
+								// job is done remove it
+								switch (status.getNewStatus().getRunState()) {
+								case JobStatus.FAILED:
+								case JobStatus.KILLED:
+								case JobStatus.SUCCEEDED:
+									jobs.remove(status.getJobInProgress()
+											.getJobID());
+								}
+							}
+						}
 					}
 
 					@Override
 					public void jobRemoved(JobInProgress job) {
 						RoundRobinScheduler.LOGGER.info("remove job	" + job);
-						RoundRobinScheduler.this.jobs.remove(job);
+						RoundRobinScheduler.this.jobs.remove(job.getJobID());
 					}
 
 					@Override
@@ -113,7 +129,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 								public void run() {
 									RoundRobinScheduler.this.taskTrackerManager
 											.initJob(GCNice.make(job));
-									RoundRobinScheduler.this.jobs.put(job, job);
+									RoundRobinScheduler.this.jobs.put(
+											job.getJobID(), job);
 								}
 							});
 						}
@@ -127,13 +144,13 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public List<Task> assignTasks(TaskTrackerStatus status) throws IOException {
 		// take a snapshot
-		final Iterator<Entry<JobInProgress, JobInProgress>> round_robin = this.jobs
+		final Iterator<Entry<JobID, JobInProgress>> round_robin = this.jobs
 				.entrySet().iterator();
 
 		// get jobs
 		List<JobInProgress> in_progress = null;
 		while (round_robin.hasNext()) {
-			JobInProgress job = round_robin.next().getKey();
+			JobInProgress job = round_robin.next().getValue();
 			if (job != null
 					&& job.getStatus().getRunState() == JobStatus.RUNNING) {
 				if (in_progress == null) {
@@ -213,6 +230,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public Collection<JobInProgress> getJobs(String identity) {
 		return GCNice.make(new CopyOnWriteArraySet<JobInProgress>(this.jobs
-				.keySet()));
+				.values()));
 	}
 }
