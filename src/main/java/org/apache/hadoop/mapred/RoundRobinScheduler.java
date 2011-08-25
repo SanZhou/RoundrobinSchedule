@@ -39,8 +39,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 	private static final List<Task> EMPTY_ASSIGNED = Collections
 			.unmodifiableList(new LinkedList<Task>());
 
-	private transient int estimate_task;
-
 	/**
 	 * an attempt to help GC
 	 * 
@@ -92,7 +90,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 	public void start() throws IOException {
 		super.start();
 		this.tracker = 0;
-		this.estimate_task = 1;
 		RoundRobinScheduler.LOGGER.info("start round robin scheduler");
 		this.taskTrackerManager
 				.addJobInProgressListener(new JobInProgressListener() {
@@ -191,7 +188,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (task != null) {
 				if (assigned == null) {
 					// lazy initialize
-					assigned = GCNice.make(new ArrayList<Task>(estimate_task));
+					assigned = GCNice.make(new ArrayList<Task>());
 				}
 				assigned.add(GCNice.make(task));
 				map_capacity--;
@@ -214,7 +211,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (task != null) {
 				if (assigned == null) {
 					// lazy initialize
-					assigned = GCNice.make(new ArrayList<Task>(estimate_task));
+					assigned = GCNice.make(new ArrayList<Task>());
 				}
 				assigned.add(GCNice.make(task));
 				reduce_capacity--;
@@ -223,13 +220,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}
 		}
 
-		// update estimate
-		estimate_task = (estimate_task + (assigned == null ? 0 : assigned
-				.size())) / 2;
 		RoundRobinScheduler.LOGGER.info("assigned task:"
 				+ (assigned == null ? 0 : assigned.size()) + " map_capacity:"
-				+ map_capacity + " reduce_capacity:" + reduce_capacity
-				+ " estimate_tasks:" + estimate_task);
+				+ map_capacity + " reduce_capacity:" + reduce_capacity);
 
 		return assigned;
 	}
