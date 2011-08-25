@@ -224,7 +224,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 		}
 
 		// update estimate
-		estimate_task = (estimate_task + assigned.size()) / 2;
+		estimate_task = (estimate_task + (assigned == null ? 0 : assigned
+				.size())) / 2;
 		RoundRobinScheduler.LOGGER.info("assigned task:"
 				+ (assigned == null ? 0 : assigned.size()) + " map_capacity:"
 				+ map_capacity + " reduce_capacity:" + reduce_capacity
