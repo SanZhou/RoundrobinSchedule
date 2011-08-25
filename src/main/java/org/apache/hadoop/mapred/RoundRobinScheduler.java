@@ -39,6 +39,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 	private static final List<Task> EMPTY_ASSIGNED = Collections
 			.unmodifiableList(new LinkedList<Task>());
 
+	private transient int estimate_task;
+
 	/**
 	 * an attempt to help GC
 	 * 
@@ -90,6 +92,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 	public void start() throws IOException {
 		super.start();
 		this.tracker = 0;
+		this.estimate_task = 1;
 		RoundRobinScheduler.LOGGER.info("start round robin scheduler");
 		this.taskTrackerManager
 				.addJobInProgressListener(new JobInProgressListener() {
@@ -155,7 +158,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 					&& job.getStatus().getRunState() == JobStatus.RUNNING) {
 				if (in_progress == null) {
 					// lazy initialize
-					in_progress = GCNice.make(new ArrayList<JobInProgress>());
+					in_progress = new ArrayList<JobInProgress>();
 				}
 				in_progress.add(job);
 			}
@@ -188,7 +191,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (task != null) {
 				if (assigned == null) {
 					// lazy initialize
-					assigned = GCNice.make(new ArrayList<Task>());
+					assigned = GCNice.make(new ArrayList<Task>(estimate_task));
 				}
 				assigned.add(GCNice.make(task));
 				map_capacity--;
@@ -211,7 +214,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (task != null) {
 				if (assigned == null) {
 					// lazy initialize
-					assigned = GCNice.make(new ArrayList<Task>());
+					assigned = GCNice.make(new ArrayList<Task>(estimate_task));
 				}
 				assigned.add(GCNice.make(task));
 				reduce_capacity--;
@@ -220,13 +223,19 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}
 		}
 
+		// update estimate
+		estimate_task = (estimate_task + assigned.size()) / 2;
 		RoundRobinScheduler.LOGGER.info("assigned task:"
 				+ (assigned == null ? 0 : assigned.size()) + " map_capacity:"
-				+ map_capacity + " reduce_capacity:" + reduce_capacity);
+				+ map_capacity + " reduce_capacity:" + reduce_capacity
+				+ " estimate_tasks:" + estimate_task);
 
 		return assigned;
 	}
 
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
 	public Collection<JobInProgress> getJobs(String identity) {
 		return GCNice.make(new CopyOnWriteArraySet<JobInProgress>(this.jobs
