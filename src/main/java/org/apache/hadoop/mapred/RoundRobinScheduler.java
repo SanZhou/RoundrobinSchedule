@@ -79,7 +79,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 	private Map<JobID, JobInProgress> jobs = new ConcurrentHashMap<JobID, JobInProgress>();
 
-	private int tracker;
+	private int global_tracker;
 
 	/**
 	 * {@inheritDoc}
@@ -89,7 +89,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public void start() throws IOException {
 		super.start();
-		this.tracker = 0;
+		this.global_tracker = 0;
 		RoundRobinScheduler.LOGGER.info("start round robin scheduler");
 		this.taskTrackerManager
 				.addJobInProgressListener(new JobInProgressListener() {
@@ -179,11 +179,15 @@ public class RoundRobinScheduler extends TaskScheduler {
 		// leave a chance to live
 		int stop = in_progress.size();
 
+		// snapshot,to make the assign max throughput
+		int local_tracker = this.global_tracker = ++this.global_tracker
+				% in_progress.size();
+
 		// ensure not empty
 		while (map_capacity > 0 && stop > 0) {
 			// iterate it
-			this.tracker = ++this.tracker % in_progress.size();
-			Task task = in_progress.get(this.tracker).obtainNewMapTask(status,
+			local_tracker = ++local_tracker % in_progress.size();
+			Task task = in_progress.get(local_tracker).obtainNewMapTask(status,
 					task_tracker, uniq_hosts);
 			if (task != null) {
 				if (assigned == null) {
@@ -205,8 +209,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 				- status.countReduceTasks();
 		while (reduce_capacity > 0 && stop > 0) {
 			// iterate it
-			this.tracker = ++this.tracker % in_progress.size();
-			Task task = in_progress.get(this.tracker).obtainNewReduceTask(
+			local_tracker = ++local_tracker % in_progress.size();
+			Task task = in_progress.get(local_tracker).obtainNewReduceTask(
 					status, task_tracker, uniq_hosts);
 			if (task != null) {
 				if (assigned == null) {
