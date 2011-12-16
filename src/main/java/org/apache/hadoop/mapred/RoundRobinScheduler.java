@@ -1,8 +1,32 @@
+/*
+ * Copyright (c) 2012, someone All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ * 
+ * 1.Redistributions of source code must retain the above copyright notice, this
+ * list of conditions and the following disclaimer. 2.Redistributions in binary
+ * form must reproduce the above copyright notice, this list of conditions and
+ * the following disclaimer in the documentation and/or other materials provided
+ * with the distribution. 3.Neither the name of the Happyelements Ltd. nor the
+ * names of its contributors may be used to endorse or promote products derived
+ * from this software without specific prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 package org.apache.hadoop.mapred;
 
 import java.io.IOException;
-import java.lang.ref.ReferenceQueue;
-import java.lang.ref.SoftReference;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -26,6 +50,7 @@ import org.apache.hadoop.mapreduce.JobID;
  * assign task in round robin fashion
  * 
  * @author <a href="mailto:zhizhong.qiu@happyelements.com">kevin</a>
+ * @author <a href="mailto:zzdtsv@gmail.com">zizon</a>
  */
 public class RoundRobinScheduler extends TaskScheduler {
 
@@ -38,44 +63,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 	private static final List<Task> EMPTY_ASSIGNED = Collections
 			.unmodifiableList(new LinkedList<Task>());
-
-	/**
-	 * an attempt to help GC
-	 * 
-	 * @author <a href="mailto:zhizhong.qiu@happyelements.com">kevin</a>
-	 * @version 1.0
-	 * @since 1.0 2011-5-3
-	 */
-	public static class GCNice {
-
-		protected static final ReferenceQueue<Object> QUEUE = new ReferenceQueue<Object>();
-
-		/**
-		 * make an obejct that attatch to an reference queue.
-		 * 
-		 * @param <Type>
-		 *            the obejct type
-		 * @param object
-		 *            the new attatch queue
-		 * @return the SoftReference object
-		 */
-		public static <Type> SoftReference<Type> makeReference(Type object) {
-			return new SoftReference<Type>(object, GCNice.QUEUE);
-		}
-
-		/**
-		 * make an obejct that attatch to an reference queue.
-		 * 
-		 * @param <Type>
-		 *            the obejct type
-		 * @param object
-		 *            the new attatch queue
-		 * @return the object
-		 */
-		public static <Type> Type make(Type object) {
-			return new SoftReference<Type>(object, GCNice.QUEUE).get();
-		}
-	}
 
 	private Map<JobID, JobInProgress> jobs = new ConcurrentHashMap<JobID, JobInProgress>();
 
@@ -128,7 +115,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 							RoundRobinScheduler.SERVICE.execute(new Runnable() {
 								public void run() {
 									RoundRobinScheduler.this.taskTrackerManager
-											.initJob(GCNice.make(job));
+											.initJob(job);
 									RoundRobinScheduler.this.jobs.put(
 											job.getJobID(), job);
 								}
@@ -192,9 +179,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (task != null) {
 				if (assigned == null) {
 					// lazy initialize
-					assigned = GCNice.make(new ArrayList<Task>());
+					assigned = new ArrayList<Task>();
 				}
-				assigned.add(GCNice.make(task));
+				assigned.add(task);
 				map_capacity--;
 			} else {
 				stop--;
@@ -215,9 +202,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (task != null) {
 				if (assigned == null) {
 					// lazy initialize
-					assigned = GCNice.make(new ArrayList<Task>());
+					assigned = new ArrayList<Task>();
 				}
-				assigned.add(GCNice.make(task));
+				assigned.add(task);
 				reduce_capacity--;
 			} else {
 				stop--;
@@ -236,7 +223,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 */
 	@Override
 	public Collection<JobInProgress> getJobs(String identity) {
-		return GCNice.make(new CopyOnWriteArraySet<JobInProgress>(this.jobs
-				.values()));
+		return new CopyOnWriteArraySet<JobInProgress>(this.jobs.values());
 	}
 }

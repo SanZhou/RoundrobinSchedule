@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 
 	<groupId>com.happyelements</groupId>
-	<artifactId>dc.hadoop.scheduler</artifactId>
+	<artifactId>hadoop.scheduler</artifactId>
 	<version>0.1.7.4</version>
 	<packaging>jar</packaging>
 
@@ -18,13 +18,6 @@
 				<configuration>
 					<source>1.6</source>
 					<target>1.6</target>
-					<encoding>utf8</encoding>
-				</configuration>
-			</plugin>
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-resources-plugin</artifactId>
-				<configuration>
 					<encoding>utf8</encoding>
 				</configuration>
 			</plugin>
