@@ -223,6 +223,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 */
 	@Override
 	public Collection<JobInProgress> getJobs(String identity) {
-		return new CopyOnWriteArraySet<JobInProgress>(this.jobs.values());
+		return new CopyOnWriteArraySet<JobInProgress>(this.jobs
+				.values());
 	}
 }
