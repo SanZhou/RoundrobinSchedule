@@ -4,7 +4,7 @@
 
 	<groupId>com.happyelements</groupId>
 	<artifactId>hadoop.scheduler</artifactId>
-	<version>0.1.7.4</version>
+	<version>0.1.7.5</version>
 	<packaging>jar</packaging>
 
 	<name>dc.hadoop.scheduler</name>

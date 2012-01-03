@@ -94,8 +94,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 								case JobStatus.FAILED:
 								case JobStatus.KILLED:
 								case JobStatus.SUCCEEDED:
-									jobs.remove(status.getJobInProgress()
-											.getJobID());
+									jobs.put(status.getJobInProgress()
+											.getJobID(), status
+											.getJobInProgress());
 								}
 							}
 						}
@@ -104,7 +105,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 					@Override
 					public void jobRemoved(JobInProgress job) {
 						RoundRobinScheduler.LOGGER.info("remove job	" + job);
-						RoundRobinScheduler.this.jobs.remove(job.getJobID());
+						RoundRobinScheduler.this.jobs.put(job.getJobID(), job);
 					}
 
 					@Override
@@ -138,13 +139,21 @@ public class RoundRobinScheduler extends TaskScheduler {
 		List<JobInProgress> in_progress = null;
 		while (round_robin.hasNext()) {
 			JobInProgress job = round_robin.next().getValue();
-			if (job != null
-					&& job.getStatus().getRunState() == JobStatus.RUNNING) {
-				if (in_progress == null) {
-					// lazy initialize
-					in_progress = new ArrayList<JobInProgress>();
+			if (job != null) {
+				switch (job.getStatus().getRunState()) {
+				case JobStatus.RUNNING:
+					if (in_progress == null) {
+						// lazy initialize
+						in_progress = new ArrayList<JobInProgress>();
+					}
+					in_progress.add(job);
+					break;
+				case JobStatus.FAILED:
+				case JobStatus.KILLED:
+				case JobStatus.SUCCEEDED:
+					round_robin.remove();
+					break;
 				}
-				in_progress.add(job);
 			}
 		}
 
@@ -223,7 +232,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 */
 	@Override
 	public Collection<JobInProgress> getJobs(String identity) {
-		return new CopyOnWriteArraySet<JobInProgress>(this.jobs
-				.values());
+		return new CopyOnWriteArraySet<JobInProgress>(this.jobs.values());
 	}
 }
