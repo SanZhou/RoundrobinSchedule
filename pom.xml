@@ -4,7 +4,7 @@
 
 	<groupId>com.happyelements</groupId>
 	<artifactId>hadoop.roundrobin.scheduler</artifactId>
-	<version>0.1.7.5</version>
+	<version>0.1.8</version>
 	<packaging>jar</packaging>
 
 	<name>dc.hadoop.scheduler</name>
@@ -35,7 +35,7 @@
 		<dependency>
 			<groupId>org.apache.hadoop</groupId>
 			<artifactId>hadoop-core</artifactId>
-			<version>0.20.2</version>
+			<version>1.0.0</version>
 			<scope>provided</scope>
 		</dependency>
 	</dependencies>

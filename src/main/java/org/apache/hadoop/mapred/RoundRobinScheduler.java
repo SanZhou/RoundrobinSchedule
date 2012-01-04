@@ -47,6 +47,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.mapreduce.JobID;
+import org.apache.hadoop.mapreduce.server.jobtracker.TaskTracker;
 
 /**
  * assign task in round robin fashion
@@ -135,12 +136,14 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 * {@inheritDoc}
 	 */
 	@Override
-	public List<Task> assignTasks(TaskTrackerStatus status) throws IOException {
+	public List<Task> assignTasks(TaskTracker tasktracker) throws IOException {
+		TaskTrackerStatus status = tasktracker.getStatus();
+		
 		// take a snapshot
 		long snapshot = version;
 		final Iterator<Entry<JobID, JobInProgress>> round_robin = this.jobs
 				.entrySet().iterator();
-
+		
 		// get jobs
 		List<JobInProgress> in_progress = null;
 		while (round_robin.hasNext()) {
@@ -168,7 +171,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			return EMPTY_ASSIGNED;
 		}
 
-		RoundRobinScheduler.LOGGER.info("assign tasks for "
+		RoundRobinScheduler.LOGGER.info("assign tasks for " 
 				+ status.getTrackerName());
 		List<Task> assigned = null;
 		int task_tracker = this.taskTrackerManager.getClusterStatus()
@@ -176,7 +179,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
 
 		// assign map task
-		int map_capacity = status.getMaxMapTasks() - status.countMapTasks();
+		int map_capacity =  status.getAvailableMapSlots();
 
 		// leave a chance to live
 		int stop = in_progress.size();
@@ -207,8 +210,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		stop = in_progress.size();
 
 		// assign reduce task
-		int reduce_capacity = status.getMaxReduceTasks()
-				- status.countReduceTasks();
+		int reduce_capacity = status.getAvailableReduceSlots();
 		while (reduce_capacity > 0 && stop > 0) {
 			// iterate it
 			local_tracker = ++local_tracker % in_progress.size();
