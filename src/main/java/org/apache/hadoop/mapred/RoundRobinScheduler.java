@@ -30,11 +30,13 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
@@ -67,6 +69,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 	private Map<JobID, JobInProgress> jobs = new ConcurrentHashMap<JobID, JobInProgress>();
 
 	private int global_tracker;
+	private volatile long version;
 
 	/**
 	 * {@inheritDoc}
@@ -77,6 +80,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 	public void start() throws IOException {
 		super.start();
 		this.global_tracker = 0;
+		this.version = System.currentTimeMillis();
+
 		RoundRobinScheduler.LOGGER.info("start round robin scheduler");
 		this.taskTrackerManager
 				.addJobInProgressListener(new JobInProgressListener() {
@@ -94,9 +99,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 								case JobStatus.FAILED:
 								case JobStatus.KILLED:
 								case JobStatus.SUCCEEDED:
-									jobs.put(status.getJobInProgress()
-											.getJobID(), status
-											.getJobInProgress());
+									jobRemoved(status.getJobInProgress());
+									break;
 								}
 							}
 						}
@@ -106,6 +110,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 					public void jobRemoved(JobInProgress job) {
 						RoundRobinScheduler.LOGGER.info("remove job	" + job);
 						RoundRobinScheduler.this.jobs.put(job.getJobID(), job);
+						version = System.currentTimeMillis();
 					}
 
 					@Override
@@ -132,6 +137,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public List<Task> assignTasks(TaskTrackerStatus status) throws IOException {
 		// take a snapshot
+		long snapshot = version;
 		final Iterator<Entry<JobID, JobInProgress>> round_robin = this.jobs
 				.entrySet().iterator();
 
@@ -220,10 +226,41 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}
 		}
 
+		// this will not eliminate miss assign,but make it a little less
+		if (snapshot != version) {
+			Set<JobID> keeped_jobs = new HashSet<JobID>();
+			do {
+				// update snapshot
+				snapshot = version;
+				keeped_jobs.clear();
+
+				// job removed
+				// mark current job id
+				// filter remove jobs
+				Iterator<JobInProgress> job_iterator = in_progress.iterator();
+				while (job_iterator.hasNext()) {
+					JobInProgress job = job_iterator.next();
+					if (jobs.containsKey(job.getJobID())) {
+						keeped_jobs.add(job.getJobID());
+					} else {
+						job_iterator.remove();
+					}
+				}
+
+				// filter task
+				Iterator<Task> task_iterator = assigned.iterator();
+				while (task_iterator.hasNext()) {
+					if (!keeped_jobs.contains(task_iterator.next().getJobID())) {
+						task_iterator.remove();
+					}
+				}
+			} while (snapshot != version);
+		}
+
 		RoundRobinScheduler.LOGGER.info("assigned task:"
 				+ (assigned == null ? 0 : assigned.size()) + " map_capacity:"
 				+ map_capacity + " reduce_capacity:" + reduce_capacity);
-
+		
 		return assigned;
 	}
 

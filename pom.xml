@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 
 	<groupId>com.happyelements</groupId>
-	<artifactId>hadoop.scheduler</artifactId>
+	<artifactId>hadoop.roundrobin.scheduler</artifactId>
 	<version>0.1.7.5</version>
 	<packaging>jar</packaging>
 
