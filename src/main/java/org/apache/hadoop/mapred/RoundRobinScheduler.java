@@ -120,24 +120,23 @@ public class RoundRobinScheduler extends TaskScheduler {
 							throws IOException {
 						RoundRobinScheduler.LOGGER.info("add job " + job);
 						if (job != null) {
-							RoundRobinScheduler.SERVICE.execute(new Runnable() {
-								@Override
-								public void run() {
-									int trys = 10;
-									do {
-										try {
-											// it may fail ,try init again
-											RoundRobinScheduler.this.taskTrackerManager
-													.initJob(job);
-											RoundRobinScheduler.this.jobs.put(
-													job.getJobID(), job);
-											break;
-										} catch (Exception e) {
-											RoundRobinScheduler.LOGGER.warn("failing job fail:trys times:"+trys+"/10", e);
-										}
-									} while (--trys > 0);
-								}
-							});
+							try {
+								// wait for async submit done.
+								// as when it return,the client may close the connection?
+								RoundRobinScheduler.SERVICE.submit(
+										new Runnable() {
+											@Override
+											public void run() {
+												RoundRobinScheduler.this.taskTrackerManager
+														.initJob(job);
+												RoundRobinScheduler.this.jobs
+														.put(job.getJobID(),
+																job);
+											}
+										}).get();
+							} catch (Exception e) {
+								RoundRobinScheduler.LOGGER.warn("wait for init done");
+							}
 						}
 					}
 				});
