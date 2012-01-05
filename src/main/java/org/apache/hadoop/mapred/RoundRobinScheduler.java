@@ -100,7 +100,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 								case JobStatus.FAILED:
 								case JobStatus.KILLED:
 								case JobStatus.SUCCEEDED:
-									jobRemoved(status.getJobInProgress());
+									this.jobRemoved(status.getJobInProgress());
 									break;
 								}
 							}
@@ -111,7 +111,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 					public void jobRemoved(JobInProgress job) {
 						RoundRobinScheduler.LOGGER.info("remove job	" + job);
 						RoundRobinScheduler.this.jobs.put(job.getJobID(), job);
-						version = System.currentTimeMillis();
+						RoundRobinScheduler.this.version = System.currentTimeMillis();
 					}
 
 					@Override
@@ -120,6 +120,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 						RoundRobinScheduler.LOGGER.info("add job " + job);
 						if (job != null) {
 							RoundRobinScheduler.SERVICE.execute(new Runnable() {
+								@Override
 								public void run() {
 									int trys = 10;
 									do {
@@ -128,13 +129,14 @@ public class RoundRobinScheduler extends TaskScheduler {
 													.initJob(job);
 											trys = 0;
 										} catch (Exception e) {
-											LOGGER.error(
+											// it may fail
+											RoundRobinScheduler.LOGGER.error(
 													"fail to initialize job:"
 															+ job, e);
 											try {
-												taskTrackerManager.failJob(job);
+												RoundRobinScheduler.this.taskTrackerManager.failJob(job);
 											} catch (Exception ignore) {
-												LOGGER.warn(
+												RoundRobinScheduler.LOGGER.warn(
 														"failing job init fail",
 														ignore);
 											}
@@ -158,7 +160,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		TaskTrackerStatus status = tasktracker.getStatus();
 
 		// take a snapshot
-		long snapshot = version;
+		long snapshot = this.version;
 		final Iterator<Entry<JobID, JobInProgress>> round_robin = this.jobs
 				.entrySet().iterator();
 
@@ -186,7 +188,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 		// no runnning job
 		if (in_progress == null) {
-			return EMPTY_ASSIGNED;
+			return RoundRobinScheduler.EMPTY_ASSIGNED;
 		}
 
 		RoundRobinScheduler.LOGGER.info("assign tasks for "
@@ -247,11 +249,11 @@ public class RoundRobinScheduler extends TaskScheduler {
 		}
 
 		// this will not eliminate miss assign,but make it a little less
-		if (snapshot != version) {
+		if (snapshot != this.version) {
 			Set<JobID> keeped_jobs = new HashSet<JobID>();
 			do {
 				// update snapshot
-				snapshot = version;
+				snapshot = this.version;
 				keeped_jobs.clear();
 
 				// job removed
@@ -260,7 +262,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 				Iterator<JobInProgress> job_iterator = in_progress.iterator();
 				while (job_iterator.hasNext()) {
 					JobInProgress job = job_iterator.next();
-					if (jobs.containsKey(job.getJobID())) {
+					if (this.jobs.containsKey(job.getJobID())) {
 						keeped_jobs.add(job.getJobID());
 					} else {
 						job_iterator.remove();
@@ -274,7 +276,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 						task_iterator.remove();
 					}
 				}
-			} while (snapshot != version);
+			} while (snapshot != this.version);
 		}
 
 		RoundRobinScheduler.LOGGER.info("assigned task:"
