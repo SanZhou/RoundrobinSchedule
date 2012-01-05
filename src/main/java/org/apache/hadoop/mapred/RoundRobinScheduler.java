@@ -127,7 +127,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 										try {
 											RoundRobinScheduler.this.taskTrackerManager
 													.initJob(job);
-											trys = 0;
+											RoundRobinScheduler.this.jobs.put(
+													job.getJobID(), job);
+											break;
 										} catch (Exception e) {
 											// it may fail
 											RoundRobinScheduler.LOGGER.error(
@@ -142,9 +144,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 											}
 										}
 									} while (--trys > 0);
-
-									RoundRobinScheduler.this.jobs.put(
-											job.getJobID(), job);
 								}
 							});
 						}
