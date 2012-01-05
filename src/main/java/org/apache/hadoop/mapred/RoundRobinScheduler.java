@@ -123,10 +123,19 @@ public class RoundRobinScheduler extends TaskScheduler {
 							RoundRobinScheduler.SERVICE.execute(new Runnable() {
 								@Override
 								public void run() {
-									RoundRobinScheduler.this.taskTrackerManager
-											.initJob(job);
-									RoundRobinScheduler.this.jobs.put(
-											job.getJobID(), job);
+									int trys = 10;
+									do {
+										try {
+											// it may fail ,try init again
+											RoundRobinScheduler.this.taskTrackerManager
+													.initJob(job);
+											RoundRobinScheduler.this.jobs.put(
+													job.getJobID(), job);
+											break;
+										} catch (Exception e) {
+											RoundRobinScheduler.LOGGER.warn("failing job fail:trys times:"+trys+"/10", e);
+										}
+									} while (--trys > 0);
 								}
 							});
 						}
