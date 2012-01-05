@@ -111,7 +111,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 					public void jobRemoved(JobInProgress job) {
 						RoundRobinScheduler.LOGGER.info("remove job	" + job);
 						RoundRobinScheduler.this.jobs.put(job.getJobID(), job);
-						RoundRobinScheduler.this.version = System.currentTimeMillis();
+						RoundRobinScheduler.this.version = System
+								.currentTimeMillis();
 					}
 
 					@Override
@@ -122,28 +123,10 @@ public class RoundRobinScheduler extends TaskScheduler {
 							RoundRobinScheduler.SERVICE.execute(new Runnable() {
 								@Override
 								public void run() {
-									int trys = 10;
-									do {
-										try {
-											RoundRobinScheduler.this.taskTrackerManager
-													.initJob(job);
-											RoundRobinScheduler.this.jobs.put(
-													job.getJobID(), job);
-											break;
-										} catch (Exception e) {
-											// it may fail
-											RoundRobinScheduler.LOGGER.error(
-													"fail to initialize job:"
-															+ job, e);
-											try {
-												RoundRobinScheduler.this.taskTrackerManager.failJob(job);
-											} catch (Exception ignore) {
-												RoundRobinScheduler.LOGGER.warn(
-														"failing job init fail",
-														ignore);
-											}
-										}
-									} while (--trys > 0);
+									RoundRobinScheduler.this.taskTrackerManager
+											.initJob(job);
+									RoundRobinScheduler.this.jobs.put(
+											job.getJobID(), job);
 								}
 							});
 						}
