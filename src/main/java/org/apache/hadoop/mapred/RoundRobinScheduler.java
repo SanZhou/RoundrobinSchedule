@@ -121,8 +121,26 @@ public class RoundRobinScheduler extends TaskScheduler {
 						if (job != null) {
 							RoundRobinScheduler.SERVICE.execute(new Runnable() {
 								public void run() {
-									RoundRobinScheduler.this.taskTrackerManager
-											.initJob(job);
+									int trys = 10;
+									do {
+										try {
+											RoundRobinScheduler.this.taskTrackerManager
+													.initJob(job);
+											trys = 0;
+										} catch (Exception e) {
+											LOGGER.error(
+													"fail to initialize job:"
+															+ job, e);
+											try {
+												taskTrackerManager.failJob(job);
+											} catch (Exception ignore) {
+												LOGGER.warn(
+														"failing job init fail",
+														ignore);
+											}
+										}
+									} while (--trys > 0);
+
 									RoundRobinScheduler.this.jobs.put(
 											job.getJobID(), job);
 								}
@@ -138,12 +156,12 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public List<Task> assignTasks(TaskTracker tasktracker) throws IOException {
 		TaskTrackerStatus status = tasktracker.getStatus();
-		
+
 		// take a snapshot
 		long snapshot = version;
 		final Iterator<Entry<JobID, JobInProgress>> round_robin = this.jobs
 				.entrySet().iterator();
-		
+
 		// get jobs
 		List<JobInProgress> in_progress = null;
 		while (round_robin.hasNext()) {
@@ -171,7 +189,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			return EMPTY_ASSIGNED;
 		}
 
-		RoundRobinScheduler.LOGGER.info("assign tasks for " 
+		RoundRobinScheduler.LOGGER.info("assign tasks for "
 				+ status.getTrackerName());
 		List<Task> assigned = null;
 		int task_tracker = this.taskTrackerManager.getClusterStatus()
@@ -179,7 +197,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
 
 		// assign map task
-		int map_capacity =  status.getAvailableMapSlots();
+		int map_capacity = status.getAvailableMapSlots();
 
 		// leave a chance to live
 		int stop = in_progress.size();
@@ -262,7 +280,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		RoundRobinScheduler.LOGGER.info("assigned task:"
 				+ (assigned == null ? 0 : assigned.size()) + " map_capacity:"
 				+ map_capacity + " reduce_capacity:" + reduce_capacity);
-		
+
 		return assigned;
 	}
 
