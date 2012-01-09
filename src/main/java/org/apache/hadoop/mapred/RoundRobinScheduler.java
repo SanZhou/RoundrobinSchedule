@@ -177,17 +177,21 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 		// try weight the jobs
 		Collections.sort(in_progress, new Comparator<JobInProgress>() {
+			
 			@Override
 			public int compare(JobInProgress o1, JobInProgress o2) {
 				// normalize to
-				// start_time*done_map*done_map*done_reduce*done_reduce
-				return (int) ((double) (o1.startTime * o1.finishedMapTasks
-						* o1.finishedMapTasks * o1.finishedReduceTasks * o1.finishedReduceTasks)
-						/ (o1.numMapTasks * o1.numReduceTasks) - (double) (o2.startTime
-						* o2.finishedMapTasks
-						* o2.finishedMapTasks
-						* o2.finishedReduceTasks * o2.finishedReduceTasks)
-						/ (o2.numMapTasks * o2.numReduceTasks));
+				// (start_time*mpas*mpas*reduces*reduces)/(finished_maps * finished_maps * finished_reduces *finished_reduces)
+				long diff =  o1.startTime * (o1.numMapTasks *o1.numMapTasks ) * (o1.numReduceTasks *o1.numReduceTasks) * (o2.finishedMapTasks * o2.finishedMapTasks) * (o2.finishedReduceTasks * o2.finishedReduceTasks);
+				diff -= o2.startTime * (o2.numMapTasks *o2.numMapTasks ) * (o2.numReduceTasks *o2.numReduceTasks) * (o1.finishedMapTasks * o1.finishedMapTasks) * (o1.finishedReduceTasks * o1.finishedReduceTasks);
+				diff -= (o2.finishedReduceTasks * o2.finishedReduceTasks) * (o1.finishedReduceTasks * o1.finishedReduceTasks);
+				if (diff > 0) {
+					return 1;
+				}else if (diff == 0) {
+					return 0;
+				}else {
+					return -1;
+				}
 			}
 		});
 
