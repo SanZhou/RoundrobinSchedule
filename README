@@ -1,1 +1,14 @@
-A Hadoop Job schedule that assign each job in round robin manner,rather simple.
+A Hadoop Job schedule that assign each job in round robin manner sort by certain weight.
+
+The job weight is calculated as following:
+
+(start_time*mpas*mpas*reduces*reduces)/(finished_maps * finished_maps * finished_reduces *finished_reduces)
+  *(now -start_time)
+
+aim to 
+1.old jobs should finished first
+2.less task jobs should finished first.
+3.job that nearly finished should finished first.
+
+When assiging tasks to tasktrackers,the scheduler will always considered local map task first,try for every submited jobs.
+This should result in all tasks are local task.
