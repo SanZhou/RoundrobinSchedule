@@ -30,6 +30,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -69,7 +70,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 	private Map<JobID, JobInProgress> jobs = new ConcurrentHashMap<JobID, JobInProgress>();
 
-	private int global_tracker;
 	private volatile long version;
 
 	/**
@@ -80,7 +80,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public void start() throws IOException {
 		super.start();
-		this.global_tracker = 0;
 		this.version = System.currentTimeMillis();
 
 		RoundRobinScheduler.LOGGER.info("start round robin scheduler");
@@ -176,6 +175,22 @@ public class RoundRobinScheduler extends TaskScheduler {
 			return RoundRobinScheduler.EMPTY_ASSIGNED;
 		}
 
+		// try weight the jobs
+		Collections.sort(in_progress, new Comparator<JobInProgress>() {
+			@Override
+			public int compare(JobInProgress o1, JobInProgress o2) {
+				// normalize to
+				// start_time*done_map*done_map*done_reduce*done_reduce
+				return (int) ((double) (o1.startTime * o1.finishedMapTasks
+						* o1.finishedMapTasks * o1.finishedReduceTasks * o1.finishedReduceTasks)
+						/ (o1.numMapTasks * o1.numReduceTasks) - (double) (o2.startTime
+						* o2.finishedMapTasks
+						* o2.finishedMapTasks
+						* o2.finishedReduceTasks * o2.finishedReduceTasks)
+						/ (o2.numMapTasks * o2.numReduceTasks));
+			}
+		});
+
 		RoundRobinScheduler.LOGGER.info("assign tasks for "
 				+ status.getTrackerName());
 		List<Task> assigned = null;
@@ -190,8 +205,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		int stop = in_progress.size();
 
 		// snapshot,to make the assign max throughput
-		int local_tracker = this.global_tracker = ++this.global_tracker
-				% in_progress.size();
+		int local_tracker = 0;
 
 		// ensure not empty
 		while (map_capacity > 0 && stop > 0) {
