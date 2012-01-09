@@ -73,6 +73,48 @@ public class RoundRobinScheduler extends TaskScheduler {
 	private volatile long version;
 
 	/**
+	 * shortcut task selector
+	 * @author <a href="mailto:zhizhong.qiu@happyelements.com">kevin</a>
+	 */
+	public static enum TaskSelector {
+		LocalMap, RackMap, Map, Reduce;
+
+		/**
+		 * select a task accroding self type
+		 * @param job
+		 * 		the job tips
+		 * @param status
+		 * 		the tasktracker status
+		 * @param cluster_size
+		 * 		the cluster size
+		 * @param uniq_hosts
+		 * 		uniq hosts
+		 * @return
+		 * 		the task selected ,null if none
+		 * @throws IOException
+		 * 		throw when obtain task fail
+		 */
+		Task select(JobInProgress job, TaskTrackerStatus status,
+				int cluster_size, int uniq_hosts) throws IOException {
+			switch (this) {
+			case LocalMap:
+				return job.obtainNewNodeLocalMapTask(status, cluster_size,
+						uniq_hosts);
+			case RackMap:
+				return job.obtainNewNodeOrRackLocalMapTask(status,
+						cluster_size, uniq_hosts);
+			case Map:
+				return job.obtainNewNonLocalMapTask(status, cluster_size,
+						uniq_hosts);
+			case Reduce:
+				return job
+						.obtainNewReduceTask(status, cluster_size, uniq_hosts);
+			}
+			return null;
+		};
+	}
+
+	/**
 	 * {@inheritDoc}
 	 * 
 	 * @see org.apache.hadoop.mapred.TaskScheduler#start()
@@ -170,13 +212,13 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}
 		}
 
-		// no runnning job
+		// no running job
 		if (in_progress == null) {
 			return RoundRobinScheduler.EMPTY_ASSIGNED;
 		}
 
-		final long now = System.currentTimeMillis();
 		// try weight the jobs
+		final long now = System.currentTimeMillis();
 		Collections.sort(in_progress, new Comparator<JobInProgress>() {
 			private double calculate(JobInProgress job) {
 				// normalize to
@@ -210,54 +252,30 @@ public class RoundRobinScheduler extends TaskScheduler {
 				.getTaskTrackers();
 		int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
 
+		assigned = new ArrayList<Task>();
+
 		// assign map task
-		int map_capacity = status.getAvailableMapSlots();
+		int map_capacity = internalAssignTasks(TaskSelector.LocalMap,
+				status.getAvailableMapSlots(), in_progress, status,
+				task_tracker, uniq_hosts, assigned);
 
-		// leave a chance to live
-		int stop = in_progress.size();
-
-		// snapshot,to make the assign max throughput
-		int local_tracker = 0;
-
-		// ensure not empty
-		while (map_capacity > 0 && stop > 0) {
-			// iterate it
-			local_tracker = ++local_tracker % in_progress.size();
-			Task task = in_progress.get(local_tracker).obtainNewMapTask(status,
-					task_tracker, uniq_hosts);
-			if (task != null) {
-				if (assigned == null) {
-					// lazy initialize
-					assigned = new ArrayList<Task>();
-				}
-				assigned.add(task);
-				map_capacity--;
-			} else {
-				stop--;
-			}
+		// get no local task ,try rack level
+		if (map_capacity > 0) {
+			map_capacity = internalAssignTasks(TaskSelector.RackMap,
+					map_capacity, in_progress, status, task_tracker,
+					uniq_hosts, assigned);
 		}
 
-		// reset flag
-		stop = in_progress.size();
+		// get no rack local , try any level
+		if (map_capacity > 0) {
+			map_capacity = internalAssignTasks(TaskSelector.Map, map_capacity,
+					in_progress, status, task_tracker, uniq_hosts, assigned);
+		}
 
 		// assign reduce task
-		int reduce_capacity = status.getAvailableReduceSlots();
-		while (reduce_capacity > 0 && stop > 0) {
-			// iterate it
-			local_tracker = ++local_tracker % in_progress.size();
-			Task task = in_progress.get(local_tracker).obtainNewReduceTask(
-					status, task_tracker, uniq_hosts);
-			if (task != null) {
-				if (assigned == null) {
-					// lazy initialize
-					assigned = new ArrayList<Task>();
-				}
-				assigned.add(task);
-				reduce_capacity--;
-			} else {
-				stop--;
-			}
-		}
+		int reduce_capacity = internalAssignTasks(TaskSelector.Reduce,
+				status.getAvailableReduceSlots(), in_progress, status,
+				task_tracker, uniq_hosts, assigned);
 
 		// this will not eliminate miss assign,but make it a little less
 		if (snapshot != this.version) {
@@ -290,6 +308,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			} while (snapshot != this.version);
 		}
 
+		// log informed
 		RoundRobinScheduler.LOGGER.info("assigned task:"
 				+ (assigned == null ? 0 : assigned.size()) + " map_capacity:"
 				+ map_capacity + " reduce_capacity:" + reduce_capacity);
@@ -303,5 +322,49 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public Collection<JobInProgress> getJobs(String identity) {
 		return new CopyOnWriteArraySet<JobInProgress>(this.jobs.values());
+	}
+
+	/**
+	 * internal assign task according to selector typ
+	 * @param selector
+	 * 		the selector
+	 * @param capacity
+	 * 		the estimate capacity
+	 * @param in_progress
+	 * 		the job
+	 * @param status
+	 * 		the tasktracker status
+	 * @param task_tracker
+	 * 		the number of task tracker
+	 * @param uniq_hosts
+	 * 		the uniq_hosts
+	 * @param assigned
+	 * 		the assigned task
+	 * @return
+	 * 		the number of remained capacity
+	 * @throws IOException
+	 * 		throw when assign fail
+	 */
+	protected int internalAssignTasks(TaskSelector selector, int capacity,
+			List<JobInProgress> in_progress, TaskTrackerStatus status,
+			int task_tracker, int uniq_hosts, List<Task> assigned)
+			throws IOException {
+		int local_tracker = 0;
+		int stop = in_progress.size();
+		while (capacity > 0 && stop > 0) {
+			// iterate it
+			Task task = selector.select(
+					in_progress.get(local_tracker = ++local_tracker
+							% in_progress.size()), status, task_tracker,
+					uniq_hosts);
+			if (task != null) {
+				assigned.add(task);
+				capacity--;
+			} else {
+				stop--;
+			}
+		}
+
+		return capacity;
 	}
 }
