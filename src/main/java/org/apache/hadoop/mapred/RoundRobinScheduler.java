@@ -68,7 +68,41 @@ public class RoundRobinScheduler extends TaskScheduler {
 			.unmodifiableList(new LinkedList<Task>());
 
 	private Map<JobID, JobInProgress> jobs = new ConcurrentHashMap<JobID, JobInProgress>();
-	private List<JobInProgress> sorted_jobs = null;
+	private List<WeightedJobInProgress> sorted_jobs = null;
+
+	/**
+	 * attatch weight to job in progress
+	 * @author <a href="mailto:zhizhong.qiu@happyelements.com">kevin</a>
+	 */
+	protected static class WeightedJobInProgress {
+		private final JobInProgress job;
+		private final double weigth;
+
+		/**
+		 * constructor , attatch job and weigth 
+		 */
+		public WeightedJobInProgress(JobInProgress job, double weigth) {
+			this.job = job;
+			this.weigth = weigth;
+		}
+
+		/**
+		 * get the job
+		 * @return
+		 * 	the job in progress
+		 */
+		public JobInProgress getJob() {
+			return this.job;
+		}
+
+		/**
+		 * get the weigh
+		 * @return
+		 */
+		public double getWeigth() {
+			return this.weigth;
+		}
+	}
 
 	/**
 	 * shortcut task selector
@@ -177,12 +211,13 @@ public class RoundRobinScheduler extends TaskScheduler {
 			public void run() {
 				while (true) {
 					try {
-						RoundRobinScheduler.LOGGER.info("trigger sort jobs");
 						Iterator<Entry<JobID, JobInProgress>> round_robin = RoundRobinScheduler.this.jobs
 								.entrySet().iterator();
 
 						// get jobs
-						List<JobInProgress> in_progress = null;
+						List<WeightedJobInProgress> in_progress = null;
+						final long now = System.currentTimeMillis();
+
 						while (round_robin.hasNext()) {
 							JobInProgress job = round_robin.next().getValue();
 							if (job != null) {
@@ -190,9 +225,26 @@ public class RoundRobinScheduler extends TaskScheduler {
 								case JobStatus.RUNNING:
 									if (in_progress == null) {
 										// lazy initialize
-										in_progress = new ArrayList<JobInProgress>();
+										in_progress = new ArrayList<WeightedJobInProgress>();
 									}
-									in_progress.add(job);
+
+									// normalize to
+									// (start_time*mpas*mpas*reduces*reduces)/(finished_maps
+									// *
+									// finished_maps * finished_reduces
+									// *finished_reduces)*(now -
+									// start_time)
+									in_progress
+											.add(new WeightedJobInProgress(
+													job,
+													((double) (job.startTime
+															* job.numMapTasks
+															* job.numMapTasks
+															* job.numReduceTasks * job.numReduceTasks))
+															/ (job.finishedMapTasks
+																	* job.finishedMapTasks
+																	* job.finishedReduceTasks * job.finishedReduceTasks)
+															* (now - job.startTime)));
 									break;
 								case JobStatus.FAILED:
 								case JobStatus.KILLED:
@@ -205,32 +257,13 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 						if (in_progress != null) {
 							// try weight the jobs
-							final long now = System.currentTimeMillis();
 							Collections.sort(in_progress,
-									new Comparator<JobInProgress>() {
-										private double calculate(
-												JobInProgress job) {
-											// normalize to
-											// (start_time*mpas*mpas*reduces*reduces)/(finished_maps
-											// *
-											// finished_maps * finished_reduces
-											// *finished_reduces)*(now -
-											// start_time)
-											return ((double) (job.startTime
-													* job.numMapTasks
-													* job.numMapTasks
-													* job.numReduceTasks * job.numReduceTasks))
-													/ (job.finishedMapTasks
-															* job.finishedMapTasks
-															* job.finishedReduceTasks * job.finishedReduceTasks)
-													* (now - job.startTime);
-										}
-
+									new Comparator<WeightedJobInProgress>() {
 										@Override
-										public int compare(JobInProgress o1,
-												JobInProgress o2) {
-											double diff = this.calculate(o1)
-													- this.calculate(o2);
+										public int compare(
+												WeightedJobInProgress o1,
+												WeightedJobInProgress o2) {
+											double diff = o1.weigth - o2.weigth;
 											if (diff > 0) {
 												return 1;
 											} else if (diff == 0) {
@@ -243,7 +276,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 							RoundRobinScheduler.this.sorted_jobs = in_progress;
 						}
-						LockSupport.parkNanos(1000000000);
+						LockSupport.parkNanos(10000000000L);
 					} catch (Exception e) {
 						RoundRobinScheduler.LOGGER.error(
 								"unknow excpetion in sort jobs thread", e);
@@ -261,7 +294,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		TaskTrackerStatus status = tasktracker.getStatus();
 
 		// get jobs
-		List<JobInProgress> in_progress = this.sorted_jobs;
+		List<WeightedJobInProgress> in_progress = this.sorted_jobs;
 		if (in_progress == null) {
 			return RoundRobinScheduler.EMPTY_ASSIGNED;
 		}
@@ -337,14 +370,15 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 * 		throw when assign fail
 	 */
 	protected int internalAssignTasks(TaskSelector selector, int capacity,
-			List<JobInProgress> in_progress, TaskTrackerStatus status,
+			List<WeightedJobInProgress> in_progress, TaskTrackerStatus status,
 			int task_tracker, int uniq_hosts, List<Task> assigned)
 			throws IOException {
 		int local_tracker = 0;
 		int stop = in_progress.size();
 		while (capacity > 0 && stop > 0) {
 			// iterate it
-			Task task = selector.select(in_progress.get(local_tracker), status,
+			Task task = selector.select(
+					in_progress.get(local_tracker).getJob(), status,
 					task_tracker, uniq_hosts);
 			local_tracker = ++local_tracker % in_progress.size();
 			if (task != null) {
