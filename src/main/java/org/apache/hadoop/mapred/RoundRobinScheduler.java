@@ -261,20 +261,22 @@ public class RoundRobinScheduler extends TaskScheduler {
 		}
 
 		// try weight the jobs
-		Collections.sort(in_progress, new Comparator<WeightedJobInProgress>() {
-			@Override
-			public int compare(WeightedJobInProgress o1,
-					WeightedJobInProgress o2) {
-				double diff = o1.weigth - o2.weigth;
-				if (diff > 0) {
-					return 1;
-				} else if (diff == 0) {
-					return 0;
-				} else {
-					return -1;
+		if (in_progress.size() > 1) {
+			Collections.sort(in_progress, new Comparator<WeightedJobInProgress>() {
+				@Override
+				public int compare(WeightedJobInProgress o1,
+						WeightedJobInProgress o2) {
+					double diff = o1.weigth - o2.weigth;
+					if (diff > 0) {
+						return 1;
+					} else if (diff == 0) {
+						return 0;
+					} else {
+						return -1;
+					}
 				}
-			}
-		});
+			});
+		}
 		RoundRobinScheduler.LOGGER.info("assign tasks for "
 				+ status.getTrackerName());
 
@@ -328,10 +330,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 		} while (selector != null);
 
 		// log informed
-		RoundRobinScheduler.LOGGER.info("assigned task:"
-				+ (assigned == null ? 0 : assigned.size()) + " map_capacity:"
-				+ status.getAvailableMapSlots() + " reduce_capacity:"
-				+ status.getAvailableReduceSlots());
+		RoundRobinScheduler.LOGGER.info("assigned task:" + assigned.size()
+				+ " map_capacity:" + status.getAvailableMapSlots()
+				+ " reduce_capacity:" + status.getAvailableReduceSlots());
 
 		return assigned;
 	}
