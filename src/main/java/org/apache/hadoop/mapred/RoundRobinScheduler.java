@@ -303,6 +303,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 					break;
 				case Map:
 					selector = TaskSelector.Reduce;
+					capacity = status.getAvailableReduceSlots();
 					break;
 				case Reduce:
 				default:
@@ -316,6 +317,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 				case RackMap:
 				case Map:
 					selector = TaskSelector.Reduce;
+					capacity = status.getAvailableReduceSlots();
 					break;
 				case Reduce:
 				default:
