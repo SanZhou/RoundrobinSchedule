@@ -309,33 +309,51 @@ public class RoundRobinScheduler extends TaskScheduler {
 		int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
 
 		// assign map task
-		int map_capacity = this.internalAssignTasks(TaskSelector.LocalMap,
-				status.getAvailableMapSlots(), in_progress, status,
-				task_tracker, uniq_hosts, assigned);
+		TaskSelector selector = TaskSelector.LocalMap;
+		int capacity = status.getAvailableMapSlots();
+		do {
+			// assign map
+			capacity = this.internalAssignTasks(selector, capacity,
+					in_progress, status, task_tracker, uniq_hosts, assigned);
 
-		// get no local task ,try rack level
-		if (map_capacity > 0) {
-			map_capacity = this.internalAssignTasks(TaskSelector.RackMap,
-					map_capacity, in_progress, status, task_tracker,
-					uniq_hosts, assigned);
-		}
-
-		// get no rack local , try any level
-		if (map_capacity > 0) {
-			map_capacity = this.internalAssignTasks(TaskSelector.Map,
-					map_capacity, in_progress, status, task_tracker,
-					uniq_hosts, assigned);
-		}
-
-		// assign reduce task
-		int reduce_capacity = this.internalAssignTasks(TaskSelector.Reduce,
-				status.getAvailableReduceSlots(), in_progress, status,
-				task_tracker, uniq_hosts, assigned);
+			// have remains,try next selector
+			if (capacity > 0) {
+				switch (selector) {
+				case LocalMap:
+					selector = TaskSelector.RackMap;
+					break;
+				case RackMap:
+					selector = TaskSelector.Map;
+					break;
+				case Map:
+					selector = TaskSelector.Reduce;
+					break;
+				case Reduce:
+				default:
+					selector = null;
+					break;
+				}
+			} else {
+				// no remains,try switch mode
+				switch (selector) {
+				case LocalMap:
+				case RackMap:
+				case Map:
+					selector = TaskSelector.Reduce;
+					break;
+				case Reduce:
+				default:
+					selector = null;
+					break;
+				}
+			}
+		} while (selector != null);
 
 		// log informed
 		RoundRobinScheduler.LOGGER.info("assigned task:"
 				+ (assigned == null ? 0 : assigned.size()) + " map_capacity:"
-				+ map_capacity + " reduce_capacity:" + reduce_capacity);
+				+ status.getAvailableMapSlots() + " reduce_capacity:"
+				+ status.getAvailableReduceSlots());
 
 		return assigned;
 	}
