@@ -203,50 +203,54 @@ public class RoundRobinScheduler extends TaskScheduler {
 							}
 						}
 
-						// try weight the jobs
-						final long now = System.currentTimeMillis();
-						Collections.sort(in_progress,
-								new Comparator<JobInProgress>() {
-									private double calculate(JobInProgress job) {
-										// normalize to
-										// (start_time*mpas*mpas*reduces*reduces)/(finished_maps
-										// *
-										// finished_maps * finished_reduces
-										// *finished_reduces)*(now -
-										// start_time)
-										return ((double) (job.startTime
-												* job.numMapTasks
-												* job.numMapTasks
-												* job.numReduceTasks * job.numReduceTasks))
-												/ (job.finishedMapTasks
-														* job.finishedMapTasks
-														* job.finishedReduceTasks * job.finishedReduceTasks)
-												* (now - job.startTime);
-									}
-
-									@Override
-									public int compare(JobInProgress o1,
-											JobInProgress o2) {
-										double diff = this.calculate(o1)
-												- this.calculate(o2);
-										if (diff > 0) {
-											return 1;
-										} else if (diff == 0) {
-											return 0;
-										} else {
-											return -1;
+						if (in_progress != null) {
+							// try weight the jobs
+							final long now = System.currentTimeMillis();
+							Collections.sort(in_progress,
+									new Comparator<JobInProgress>() {
+										private double calculate(
+												JobInProgress job) {
+											// normalize to
+											// (start_time*mpas*mpas*reduces*reduces)/(finished_maps
+											// *
+											// finished_maps * finished_reduces
+											// *finished_reduces)*(now -
+											// start_time)
+											return ((double) (job.startTime
+													* job.numMapTasks
+													* job.numMapTasks
+													* job.numReduceTasks * job.numReduceTasks))
+													/ (job.finishedMapTasks
+															* job.finishedMapTasks
+															* job.finishedReduceTasks * job.finishedReduceTasks)
+													* (now - job.startTime);
 										}
-									}
-								});
 
-						RoundRobinScheduler.this.sorted_jobs = in_progress;
+										@Override
+										public int compare(JobInProgress o1,
+												JobInProgress o2) {
+											double diff = this.calculate(o1)
+													- this.calculate(o2);
+											if (diff > 0) {
+												return 1;
+											} else if (diff == 0) {
+												return 0;
+											} else {
+												return -1;
+											}
+										}
+									});
+
+							RoundRobinScheduler.this.sorted_jobs = in_progress;
+						}
 						LockSupport.parkNanos(1000000000);
 					} catch (Exception e) {
-						RoundRobinScheduler.LOGGER.error("unknow excpetion in sort jobs thread", e);
+						RoundRobinScheduler.LOGGER.error(
+								"unknow excpetion in sort jobs thread", e);
 					}
 				}
 			}
-		},"sort-jobs-thread").start();
+		}, "sort-jobs-thread").start();
 	}
 
 	/**
@@ -271,7 +275,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 				.getTaskTrackers();
 		int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
 
-
 		// assign map task
 		int map_capacity = this.internalAssignTasks(TaskSelector.LocalMap,
 				status.getAvailableMapSlots(), in_progress, status,
@@ -286,8 +289,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 		// get no rack local , try any level
 		if (map_capacity > 0) {
-			map_capacity = this.internalAssignTasks(TaskSelector.Map, map_capacity,
-					in_progress, status, task_tracker, uniq_hosts, assigned);
+			map_capacity = this.internalAssignTasks(TaskSelector.Map,
+					map_capacity, in_progress, status, task_tracker,
+					uniq_hosts, assigned);
 		}
 
 		// assign reduce task
