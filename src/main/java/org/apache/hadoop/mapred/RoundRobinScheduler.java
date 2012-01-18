@@ -57,7 +57,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 			.unmodifiableList(new LinkedList<Task>());
 
 	private Map<JobID, JobInProgress> jobs = new ConcurrentHashMap<JobID, JobInProgress>();
-	private int globe_tracker = 0;
 
 	/**
 	 * shortcut task selector
@@ -274,7 +273,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			JobInProgress[] in_progress, TaskTrackerStatus status,
 			int task_tracker, int uniq_hosts, List<Task> assigned)
 			throws IOException {
-		int local_tracker = ++globe_tracker % in_progress.length;
+		int local_tracker = 0;
 		int stop = in_progress.length;
 		while (capacity > 0 && stop > 0) {
 			// iterate it
