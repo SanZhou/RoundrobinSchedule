@@ -35,8 +35,11 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.locks.LockSupport;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -64,6 +67,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 					return o1.getId() - o2.getId();
 				}
 			});
+
+	private Queue<JobInProgress> initialize_queue = new ConcurrentLinkedQueue<JobInProgress>();
 
 	/**
 	 * shortcut task selector
@@ -116,6 +121,26 @@ public class RoundRobinScheduler extends TaskScheduler {
 	public void start() throws IOException {
 		super.start();
 
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				while (true) {
+					try {
+						JobInProgress job = RoundRobinScheduler.this.initialize_queue.poll();
+						if (job != null) {
+							RoundRobinScheduler.this.taskTrackerManager.initJob(job);
+							RoundRobinScheduler.this.jobs.put(job.getJobID(),
+									job);
+						}else {
+							LockSupport.parkNanos(1000000000);
+						}
+					} catch (Exception e) {
+						RoundRobinScheduler.LOGGER.error("fail to initialize job", e);
+					}
+				}
+			}
+		}, "async-job-initializer").start();
+
 		RoundRobinScheduler.LOGGER.info("start round robin scheduler");
 		this.taskTrackerManager
 				.addJobInProgressListener(new JobInProgressListener() {
@@ -151,13 +176,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 							throws IOException {
 						RoundRobinScheduler.LOGGER.info("add job " + job);
 						if (job != null) {
-							// wait for async submit done.
-							// as when it return,the client may close the
-							// connection?
-							RoundRobinScheduler.this.taskTrackerManager
-									.initJob(job);
-							RoundRobinScheduler.this.jobs.put(job.getJobID(),
-									job);
+							// sumbit async
+							RoundRobinScheduler.this.initialize_queue.offer(job);
 						}
 					}
 				});
