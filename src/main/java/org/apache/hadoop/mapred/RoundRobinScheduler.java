@@ -280,11 +280,12 @@ public class RoundRobinScheduler extends TaskScheduler {
 			// iterate it
 			Task task = selector.select(in_progress[local_tracker], status,
 					task_tracker, uniq_hosts);
+			local_tracker = ++local_tracker % in_progress.length;
 			if (task != null) {
 				assigned.add(task);
 				capacity--;
+				stop++;
 			} else {
-				local_tracker = ++local_tracker % in_progress.length;
 				stop--;
 			}
 		}
