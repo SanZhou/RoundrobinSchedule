@@ -190,12 +190,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (capacity > 0) {
 				switch (selector) {
 				case LocalMap:
-					selector = TaskSelector.RackMap;
-					break;
-				case RackMap:
-					selector = TaskSelector.Map;
-					break;
-				case Map:
 					selector = TaskSelector.Reduce;
 					capacity = status.getAvailableReduceSlots();
 					break;
@@ -208,8 +202,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 				// no remains,try switch mode
 				switch (selector) {
 				case LocalMap:
-				case RackMap:
-				case Map:
 					selector = TaskSelector.Reduce;
 					capacity = status.getAvailableReduceSlots();
 					break;
