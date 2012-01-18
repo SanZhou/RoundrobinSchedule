@@ -30,11 +30,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 import org.apache.commons.logging.Log;
@@ -56,7 +57,13 @@ public class RoundRobinScheduler extends TaskScheduler {
 	private static final List<Task> EMPTY_ASSIGNED = Collections
 			.unmodifiableList(new LinkedList<Task>());
 
-	private Map<JobID, JobInProgress> jobs = new ConcurrentHashMap<JobID, JobInProgress>();
+	private Map<JobID, JobInProgress> jobs = new ConcurrentSkipListMap<JobID, JobInProgress>(
+			new Comparator<JobID>() {
+				@Override
+				public int compare(JobID o1, JobID o2) {
+					return o1.getId() - o2.getId();
+				}
+			});
 
 	/**
 	 * shortcut task selector
