@@ -34,10 +34,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -54,10 +50,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 	private static final Log LOGGER = LogFactory
 			.getLog(RoundRobinScheduler.class);
-
-	private static ExecutorService SERVICE = new ThreadPoolExecutor(0,
-			Short.MAX_VALUE, 10, TimeUnit.SECONDS,
-			new LinkedBlockingQueue<Runnable>());
 
 	private static final List<Task> EMPTY_ASSIGNED = Collections
 			.unmodifiableList(new LinkedList<Task>());
@@ -154,15 +146,10 @@ public class RoundRobinScheduler extends TaskScheduler {
 							// wait for async submit done.
 							// as when it return,the client may close the
 							// connection?
-							RoundRobinScheduler.SERVICE.execute(new Runnable() {
-								@Override
-								public void run() {
-									RoundRobinScheduler.this.taskTrackerManager
-											.initJob(job);
-									RoundRobinScheduler.this.jobs.put(
-											job.getJobID(), job);
-								}
-							});
+							RoundRobinScheduler.this.taskTrackerManager
+									.initJob(job);
+							RoundRobinScheduler.this.jobs.put(job.getJobID(),
+									job);
 						}
 					}
 				});
@@ -176,7 +163,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 		TaskTrackerStatus status = tasktracker.getStatus();
 
 		// get jobs
-		JobInProgress[] in_progress = this.jobs.values().toArray(new JobInProgress[0]);
+		JobInProgress[] in_progress = this.jobs.values().toArray(
+				new JobInProgress[0]);
 		if (in_progress == null || in_progress.length < 1) {
 			return RoundRobinScheduler.EMPTY_ASSIGNED;
 		}
