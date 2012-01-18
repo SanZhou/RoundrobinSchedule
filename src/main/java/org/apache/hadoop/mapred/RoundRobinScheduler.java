@@ -27,8 +27,10 @@
 package org.apache.hadoop.mapred;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -163,8 +165,18 @@ public class RoundRobinScheduler extends TaskScheduler {
 		TaskTrackerStatus status = tasktracker.getStatus();
 
 		// get jobs
-		JobInProgress[] in_progress = this.jobs.values().toArray(
-				new JobInProgress[0]);
+		JobInProgress[] in_progress = null;
+		{
+			List<JobInProgress> buffer = new ArrayList<JobInProgress>();
+			Iterator<JobInProgress> iterator = this.jobs.values().iterator();
+			while (iterator.hasNext()) {
+				buffer.add(iterator.next());
+			}
+
+			if (buffer.size() > 0) {
+				in_progress = buffer.toArray(new JobInProgress[buffer.size()]);
+			}
+		}
 		if (in_progress == null || in_progress.length < 1) {
 			return RoundRobinScheduler.EMPTY_ASSIGNED;
 		}
