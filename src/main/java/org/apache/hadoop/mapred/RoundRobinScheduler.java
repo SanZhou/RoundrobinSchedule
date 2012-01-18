@@ -254,7 +254,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			JobInProgress[] in_progress, TaskTrackerStatus status,
 			int task_tracker, int uniq_hosts, List<Task> assigned)
 			throws IOException {
-		int local_tracker = globe_tracker % in_progress.length;
+		int local_tracker = ++globe_tracker % in_progress.length;
 		int stop = in_progress.length;
 		while (capacity > 0 && stop > 0) {
 			// iterate it
