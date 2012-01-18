@@ -27,15 +27,11 @@
 package org.apache.hadoop.mapred;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
-import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
@@ -67,40 +63,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			.unmodifiableList(new LinkedList<Task>());
 
 	private Map<JobID, JobInProgress> jobs = new ConcurrentHashMap<JobID, JobInProgress>();
-
-	/**
-	 * attatch weight to job in progress
-	 * @author <a href="mailto:zhizhong.qiu@happyelements.com">kevin</a>
-	 */
-	protected static class WeightedJobInProgress {
-		private final JobInProgress job;
-		private final double weigth;
-
-		/**
-		 * constructor , attatch job and weigth 
-		 */
-		public WeightedJobInProgress(JobInProgress job, double weigth) {
-			this.job = job;
-			this.weigth = weigth;
-		}
-
-		/**
-		 * get the job
-		 * @return
-		 * 	the job in progress
-		 */
-		public JobInProgress getJob() {
-			return this.job;
-		}
-
-		/**
-		 * get the weigh
-		 * @return
-		 */
-		public double getWeigth() {
-			return this.weigth;
-		}
-	}
+	private int globe_tracker = 0;
 
 	/**
 	 * shortcut task selector
@@ -211,77 +174,18 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public List<Task> assignTasks(TaskTracker tasktracker) throws IOException {
 		TaskTrackerStatus status = tasktracker.getStatus();
-		Iterator<Entry<JobID, JobInProgress>> round_robin = RoundRobinScheduler.this.jobs
-				.entrySet().iterator();
 
 		// get jobs
-		List<WeightedJobInProgress> in_progress = null;
-		final long now = System.currentTimeMillis();
-
-		// find running jobs
-		while (round_robin.hasNext()) {
-			JobInProgress job = round_robin.next().getValue();
-			if (job != null) {
-				switch (job.getStatus().getRunState()) {
-				case JobStatus.RUNNING:
-					if (in_progress == null) {
-						// lazy initialize
-						in_progress = new ArrayList<WeightedJobInProgress>();
-					}
-
-					// normalize to
-					// (start_time*mpas*mpas*reduces*reduces)/(finished_maps
-					// *
-					// finished_maps * finished_reduces
-					// *finished_reduces)*(now -
-					// start_time)
-					in_progress
-							.add(new WeightedJobInProgress(
-									job,
-									((double) (job.startTime * job.numMapTasks
-											* job.numMapTasks
-											* job.numReduceTasks * job.numReduceTasks))
-											/ (job.finishedMapTasks
-													* job.finishedMapTasks
-													* job.finishedReduceTasks * job.finishedReduceTasks)
-											* (now - job.startTime)));
-					break;
-				case JobStatus.FAILED:
-				case JobStatus.KILLED:
-				case JobStatus.SUCCEEDED:
-					round_robin.remove();
-					break;
-				}
-			}
-		}
-
-		// get jobs
-		if (in_progress == null) {
+		JobInProgress[] in_progress = this.jobs.values().toArray(new JobInProgress[0]);
+		if (in_progress == null || in_progress.length < 1) {
 			return RoundRobinScheduler.EMPTY_ASSIGNED;
 		}
 
-		// try weight the jobs
-		if (in_progress.size() > 1) {
-			Collections.sort(in_progress, new Comparator<WeightedJobInProgress>() {
-				@Override
-				public int compare(WeightedJobInProgress o1,
-						WeightedJobInProgress o2) {
-					double diff = o1.weigth - o2.weigth;
-					if (diff > 0) {
-						return 1;
-					} else if (diff == 0) {
-						return 0;
-					} else {
-						return -1;
-					}
-				}
-			});
-		}
 		RoundRobinScheduler.LOGGER.info("assign tasks for "
 				+ status.getTrackerName());
 
 		// prepare task
-		List<Task> assigned = new ArrayList<Task>();
+		List<Task> assigned = new LinkedList<Task>();
 		final int task_tracker = this.taskTrackerManager.getClusterStatus()
 				.getTaskTrackers();
 		final int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
@@ -367,21 +271,20 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 * 		throw when assign fail
 	 */
 	protected int internalAssignTasks(TaskSelector selector, int capacity,
-			List<WeightedJobInProgress> in_progress, TaskTrackerStatus status,
+			JobInProgress[] in_progress, TaskTrackerStatus status,
 			int task_tracker, int uniq_hosts, List<Task> assigned)
 			throws IOException {
-		int local_tracker = 0;
-		int stop = in_progress.size();
+		int local_tracker = globe_tracker % in_progress.length;
+		int stop = in_progress.length;
 		while (capacity > 0 && stop > 0) {
 			// iterate it
-			Task task = selector.select(
-					in_progress.get(local_tracker).getJob(), status,
+			Task task = selector.select(in_progress[local_tracker], status,
 					task_tracker, uniq_hosts);
-			local_tracker = ++local_tracker % in_progress.size();
 			if (task != null) {
 				assigned.add(task);
 				capacity--;
 			} else {
+				local_tracker = ++local_tracker % in_progress.length;
 				stop--;
 			}
 		}
