@@ -320,12 +320,14 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}
 
 			// avoid concurrent exception
-			try {
-				job = in_progress.next();
-			} catch (NoSuchElementException e) {
-			} finally {
-				if (job == null) {
-					break;
+			if (job == null) {
+				try {
+					job = in_progress.next();
+				} catch (NoSuchElementException e) {
+				} finally {
+					if (job == null) {
+						break;
+					}
 				}
 			}
 
@@ -334,6 +336,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (task != null) {
 				assigned.add(task);
 				capacity--;
+			} else {
+				job = null;
 			}
 		}
 
