@@ -34,16 +34,16 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.mapreduce.JobID;
 import org.apache.hadoop.mapreduce.server.jobtracker.TaskTracker;
 
 /**
@@ -60,15 +60,84 @@ public class RoundRobinScheduler extends TaskScheduler {
 	private static final List<Task> EMPTY_ASSIGNED = Collections
 			.unmodifiableList(new LinkedList<Task>());
 
-	private Map<JobID, JobInProgress> jobs = new ConcurrentSkipListMap<JobID, JobInProgress>(
-			new Comparator<JobID>() {
+	private Set<JobInProgress> jobs = new ConcurrentSkipListSet<JobInProgress>(
+			new Comparator<JobInProgress>() {
+				private int translatePriority(JobPriority priority) {
+					switch (priority) {
+					case VERY_HIGH:
+						return 0;
+					case HIGH:
+						return 1;
+					case NORMAL:
+						return 2;
+					case LOW:
+						return 3;
+					case VERY_LOW:
+						return 4;
+					default:
+						return 5;
+					}
+				}
+
 				@Override
-				public int compare(JobID o1, JobID o2) {
-					return o1.getId() - o2.getId();
+				public int compare(JobInProgress o1, JobInProgress o2) {
+					// first fall back
+					if (o1.getJobID().equals(o2.getJobID())) {
+						return 0;
+					}
+
+					// then compare priority
+					int diff = this.translatePriority(o1.getPriority())
+							- this.translatePriority(o2.getPriority());
+					if (diff == 0) {
+						return o1.getJobID().compareTo(o2.getJobID());
+					} else {
+						return diff;
+					}
 				}
 			});
 
-	private Queue<JobInProgress> initialize_queue = new ConcurrentLinkedQueue<JobInProgress>();
+	private Queue<JobInProgress> initialize_queue;
+
+	private AtomicReference<ScheduleStage> schedule_stage;
+
+	/**
+	 * schedule lock stage
+	 * @author <a href="mailto:zhizhong.qiu@happyelements.com">kevin</a>
+	 */
+	public static enum ScheduleStage {
+		READING, NORMAL, WRITING;
+		/**
+		 * acquire lock for the stage
+		 * @param lock
+		 * 		the lock
+		 * @param next_stage
+		 * 		the next stage
+		 */
+		public static void acquireStage(AtomicReference<ScheduleStage> lock,
+				ScheduleStage next_stage) {
+			int fail = 0;
+			while (!lock.compareAndSet(NORMAL, next_stage)) {
+				if (fail++ > 20) {
+					// escape
+					break;
+				}
+				Thread.yield();
+			}
+		}
+
+		/**
+		 * release stage
+		 * @param lock
+		 * 		the lock
+		 * @param expected
+		 * 		the expected current stage
+		 */
+		public static void releaseStage(AtomicReference<ScheduleStage> lock,
+				ScheduleStage expected) {
+			lock.compareAndSet(expected, NORMAL);
+		}
+	}
 
 	/**
 	 * shortcut task selector
@@ -121,6 +190,10 @@ public class RoundRobinScheduler extends TaskScheduler {
 	public void start() throws IOException {
 		super.start();
 
+		this.initialize_queue = new ConcurrentLinkedQueue<JobInProgress>();
+		this.schedule_stage = new AtomicReference<RoundRobinScheduler.ScheduleStage>(
+				ScheduleStage.NORMAL);
+
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
@@ -128,14 +201,15 @@ public class RoundRobinScheduler extends TaskScheduler {
 					try {
 						JobInProgress job = RoundRobinScheduler.this.initialize_queue.poll();
 						if (job != null) {
-							RoundRobinScheduler.this.taskTrackerManager.initJob(job);
-							RoundRobinScheduler.this.jobs.put(job.getJobID(),
-									job);
-						}else {
+							RoundRobinScheduler.this.taskTrackerManager
+									.initJob(job);
+							RoundRobinScheduler.this.jobs.add(job);
+						} else {
 							LockSupport.parkNanos(1000000000);
 						}
 					} catch (Exception e) {
-						RoundRobinScheduler.LOGGER.error("fail to initialize job", e);
+						RoundRobinScheduler.LOGGER.error(
+								"fail to initialize job", e);
 					}
 				}
 			}
@@ -168,7 +242,13 @@ public class RoundRobinScheduler extends TaskScheduler {
 					@Override
 					public void jobRemoved(JobInProgress job) {
 						RoundRobinScheduler.LOGGER.info("remove job	" + job);
-						RoundRobinScheduler.this.jobs.remove(job.getJobID());
+						ScheduleStage.acquireStage(
+								RoundRobinScheduler.this.schedule_stage,
+								ScheduleStage.WRITING);
+						RoundRobinScheduler.this.jobs.remove(job);
+						ScheduleStage.releaseStage(
+								RoundRobinScheduler.this.schedule_stage,
+								ScheduleStage.WRITING);
 					}
 
 					@Override
@@ -177,7 +257,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 						RoundRobinScheduler.LOGGER.info("add job " + job);
 						if (job != null) {
 							// sumbit async
-							RoundRobinScheduler.this.initialize_queue.offer(job);
+							RoundRobinScheduler.this.initialize_queue
+									.offer(job);
 						}
 					}
 				});
@@ -188,13 +269,15 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 */
 	@Override
 	public List<Task> assignTasks(TaskTracker tasktracker) throws IOException {
+
 		TaskTrackerStatus status = tasktracker.getStatus();
 
 		// get jobs
+		ScheduleStage.acquireStage(this.schedule_stage, ScheduleStage.READING);
 		JobInProgress[] in_progress = null;
 		{
 			List<JobInProgress> buffer = new ArrayList<JobInProgress>();
-			Iterator<JobInProgress> iterator = this.jobs.values().iterator();
+			Iterator<JobInProgress> iterator = this.jobs.iterator();
 			while (iterator.hasNext()) {
 				buffer.add(iterator.next());
 			}
@@ -206,6 +289,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		if (in_progress == null || in_progress.length < 1) {
 			return RoundRobinScheduler.EMPTY_ASSIGNED;
 		}
+		ScheduleStage.releaseStage(this.schedule_stage, ScheduleStage.READING);
 
 		RoundRobinScheduler.LOGGER.info("assign tasks for "
 				+ status.getTrackerName());
@@ -272,7 +356,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 */
 	@Override
 	public Collection<JobInProgress> getJobs(String identity) {
-		return new CopyOnWriteArraySet<JobInProgress>(this.jobs.values());
+		return new CopyOnWriteArraySet<JobInProgress>(this.jobs);
 	}
 
 	/**
