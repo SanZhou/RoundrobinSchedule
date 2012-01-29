@@ -27,19 +27,17 @@
 package org.apache.hadoop.mapred;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 
 import org.apache.commons.logging.Log;
@@ -56,9 +54,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 	private static final Log LOGGER = LogFactory
 			.getLog(RoundRobinScheduler.class);
-
-	private static final List<Task> EMPTY_ASSIGNED = Collections
-			.unmodifiableList(new LinkedList<Task>());
 
 	private Set<JobInProgress> jobs = new ConcurrentSkipListSet<JobInProgress>(
 			new Comparator<JobInProgress>() {
@@ -98,46 +93,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 			});
 
 	private Queue<JobInProgress> initialize_queue;
-
-	private AtomicReference<ScheduleStage> schedule_stage;
-
-	/**
-	 * schedule lock stage
-	 * @author <a href="mailto:zhizhong.qiu@happyelements.com">kevin</a>
-	 */
-	public static enum ScheduleStage {
-		READING, NORMAL, WRITING;
-		/**
-		 * acquire lock for the stage
-		 * @param lock
-		 * 		the lock
-		 * @param next_stage
-		 * 		the next stage
-		 */
-		public static void acquireStage(AtomicReference<ScheduleStage> lock,
-				ScheduleStage next_stage) {
-			int fail = 0;
-			while (!lock.compareAndSet(NORMAL, next_stage)) {
-				if (fail++ > 20) {
-					// escape
-					break;
-				}
-				Thread.yield();
-			}
-		}
-
-		/**
-		 * release stage
-		 * @param lock
-		 * 		the lock
-		 * @param expected
-		 * 		the expected current stage
-		 */
-		public static void releaseStage(AtomicReference<ScheduleStage> lock,
-				ScheduleStage expected) {
-			lock.compareAndSet(expected, NORMAL);
-		}
-	}
 
 	/**
 	 * shortcut task selector
@@ -191,8 +146,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 		super.start();
 
 		this.initialize_queue = new ConcurrentLinkedQueue<JobInProgress>();
-		this.schedule_stage = new AtomicReference<RoundRobinScheduler.ScheduleStage>(
-				ScheduleStage.NORMAL);
 
 		new Thread(new Runnable() {
 			@Override
@@ -242,13 +195,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 					@Override
 					public void jobRemoved(JobInProgress job) {
 						RoundRobinScheduler.LOGGER.info("remove job	" + job);
-						ScheduleStage.acquireStage(
-								RoundRobinScheduler.this.schedule_stage,
-								ScheduleStage.WRITING);
 						RoundRobinScheduler.this.jobs.remove(job);
-						ScheduleStage.releaseStage(
-								RoundRobinScheduler.this.schedule_stage,
-								ScheduleStage.WRITING);
 					}
 
 					@Override
@@ -272,25 +219,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 		TaskTrackerStatus status = tasktracker.getStatus();
 
-		// get jobs
-		ScheduleStage.acquireStage(this.schedule_stage, ScheduleStage.READING);
-		JobInProgress[] in_progress = null;
-		{
-			List<JobInProgress> buffer = new ArrayList<JobInProgress>();
-			Iterator<JobInProgress> iterator = this.jobs.iterator();
-			while (iterator.hasNext()) {
-				buffer.add(iterator.next());
-			}
-
-			if (buffer.size() > 0) {
-				in_progress = buffer.toArray(new JobInProgress[buffer.size()]);
-			}
-		}
-		if (in_progress == null || in_progress.length < 1) {
-			return RoundRobinScheduler.EMPTY_ASSIGNED;
-		}
-		ScheduleStage.releaseStage(this.schedule_stage, ScheduleStage.READING);
-
 		RoundRobinScheduler.LOGGER.info("assign tasks for "
 				+ status.getTrackerName());
 
@@ -305,8 +233,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 		int capacity = status.getAvailableMapSlots();
 		do {
 			// assign map
-			capacity = this.internalAssignTasks(selector, capacity,
-					in_progress, status, task_tracker, uniq_hosts, assigned);
+			capacity = this.internalAssignTasks(selector, capacity, status,
+					task_tracker, uniq_hosts, assigned);
 
 			// have remains,try next selector
 			if (capacity > 0) {
@@ -381,22 +309,31 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 * 		throw when assign fail
 	 */
 	protected int internalAssignTasks(TaskSelector selector, int capacity,
-			JobInProgress[] in_progress, TaskTrackerStatus status,
-			int task_tracker, int uniq_hosts, List<Task> assigned)
-			throws IOException {
-		int local_tracker = 0;
-		int stop = in_progress.length;
-		while (capacity > 0 && stop > 0) {
+			TaskTrackerStatus status, int task_tracker, int uniq_hosts,
+			List<Task> assigned) throws IOException {
+		Iterator<JobInProgress> in_progress = this.jobs.iterator();
+		JobInProgress job = null;
+		while (capacity > 0) {
+			// no jobs,quit
+			if (!in_progress.hasNext()) {
+				break;
+			}
+
+			// avoid concurrent exception
+			try {
+				job = in_progress.next();
+			} catch (NoSuchElementException e) {
+			} finally {
+				if (job == null) {
+					break;
+				}
+			}
+
 			// iterate it
-			Task task = selector.select(in_progress[local_tracker], status,
-					task_tracker, uniq_hosts);
-			local_tracker = ++local_tracker % in_progress.length;
+			Task task = selector.select(job, status, task_tracker, uniq_hosts);
 			if (task != null) {
 				assigned.add(task);
 				capacity--;
-				stop++;
-			} else {
-				stop--;
 			}
 		}
 
