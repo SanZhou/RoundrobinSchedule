@@ -311,22 +311,28 @@ public class RoundRobinScheduler extends TaskScheduler {
 	protected int internalAssignTasks(TaskSelector selector, int capacity,
 			TaskTrackerStatus status, int task_tracker, int uniq_hosts,
 			List<Task> assigned) throws IOException {
+		// quick path
+		if (capacity < 1 || status == null || assigned == null) {
+			return capacity;
+		}
+
+		// test if have job in queue
 		Iterator<JobInProgress> in_progress = this.jobs.iterator();
 		JobInProgress job = null;
-		while (capacity > 0) {
-			// no jobs,quit
-			if (!in_progress.hasNext()) {
-				break;
-			}
-
-			// avoid concurrent exception
+		if (in_progress.hasNext()) {
 			try {
 				job = in_progress.next();
 			} catch (NoSuchElementException e) {
-			} finally {
-				if (job == null) {
-					break;
-				}
+				job = null;
+			}
+		}
+
+		// flag indicate assign one while looping
+		boolean found_one = false;
+		do {
+			// no job
+			if (job == null) {
+				break;
 			}
 
 			// iterate it
@@ -334,8 +340,23 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if (task != null) {
 				assigned.add(task);
 				capacity--;
+				found_one = true;
 			}
-		}
+
+			// reach the end,try restart from head if possible
+			if (!in_progress.hasNext() && found_one) {
+				found_one = false;
+				in_progress = this.jobs.iterator();
+			}
+
+			// a little tricky to find next
+			// it is OK if haseNext return false here.
+			try {
+				job = in_progress.next();
+			} catch (NoSuchElementException e) {
+				job = null;
+			}
+		} while (capacity > 0);
 
 		return capacity;
 	}
