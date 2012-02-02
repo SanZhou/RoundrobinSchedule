@@ -42,6 +42,7 @@ import java.util.concurrent.locks.LockSupport;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.mapreduce.JobID;
 import org.apache.hadoop.mapreduce.server.jobtracker.TaskTracker;
 
 /**
@@ -54,45 +55,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 	private static final Log LOGGER = LogFactory
 			.getLog(RoundRobinScheduler.class);
-
-	private Set<JobInProgress> jobs = new ConcurrentSkipListSet<JobInProgress>(
-			new Comparator<JobInProgress>() {
-				private int translatePriority(JobPriority priority) {
-					switch (priority) {
-					case VERY_HIGH:
-						return 0;
-					case HIGH:
-						return 1;
-					case NORMAL:
-						return 2;
-					case LOW:
-						return 3;
-					case VERY_LOW:
-						return 4;
-					default:
-						return 5;
-					}
-				}
-
-				@Override
-				public int compare(JobInProgress o1, JobInProgress o2) {
-					// first fall back
-					if (o1.getJobID().equals(o2.getJobID())) {
-						return 0;
-					}
-
-					// then compare priority
-					int diff = this.translatePriority(o1.getPriority())
-							- this.translatePriority(o2.getPriority());
-					if (diff == 0) {
-						return o1.getJobID().compareTo(o2.getJobID());
-					} else {
-						return diff;
-					}
-				}
-			});
-
-	private Queue<JobInProgress> initialize_queue;
 
 	/**
 	 * shortcut task selector
@@ -136,6 +98,67 @@ public class RoundRobinScheduler extends TaskScheduler {
 		};
 	}
 
+	private Queue<JobInProgress> initialize_queue = new ConcurrentLinkedQueue<JobInProgress>() {
+		private static final long serialVersionUID = 72287877066765720L;
+		{
+			new Thread(new Runnable() {
+				@Override
+				public void run() {
+					while (true) {
+						try {
+							JobInProgress job = poll();
+							if (job != null) {
+								RoundRobinScheduler.this.taskTrackerManager.initJob(job);
+								RoundRobinScheduler.this.jobs.add(job);
+							} else {
+								LockSupport.parkNanos(1000000000);
+							}
+						} catch (Exception e) {
+							RoundRobinScheduler.LOGGER.error(
+									"fail to initialize job", e);
+						}
+					}
+				}
+			}, "async-job-initializer").start();
+		}
+	};
+	private Set<JobInProgress> jobs = new ConcurrentSkipListSet<JobInProgress>(
+			new Comparator<JobInProgress>() {
+				private int translatePriority(JobPriority priority) {
+					switch (priority) {
+					case VERY_HIGH:
+						return 0;
+					case HIGH:
+						return 1;
+					case NORMAL:
+						return 2;
+					case LOW:
+						return 3;
+					case VERY_LOW:
+						return 4;
+					default:
+						return 5;
+					}
+				}
+
+				@Override
+				public int compare(JobInProgress o1, JobInProgress o2) {
+					// first fall back
+					if (o1.getJobID().equals(o2.getJobID())) {
+						return 0;
+					}
+
+					// then compare priority
+					int diff = this.translatePriority(o1.getPriority())
+							- this.translatePriority(o2.getPriority());
+					if (diff == 0) {
+						return o1.getJobID().compareTo(o2.getJobID());
+					} else {
+						return diff;
+					}
+				}
+			});
+
 	/**
 	 * {@inheritDoc}
 	 * 
@@ -144,29 +167,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public void start() throws IOException {
 		super.start();
-
-		this.initialize_queue = new ConcurrentLinkedQueue<JobInProgress>();
-
-		new Thread(new Runnable() {
-			@Override
-			public void run() {
-				while (true) {
-					try {
-						JobInProgress job = RoundRobinScheduler.this.initialize_queue.poll();
-						if (job != null) {
-							RoundRobinScheduler.this.taskTrackerManager
-									.initJob(job);
-							RoundRobinScheduler.this.jobs.add(job);
-						} else {
-							LockSupport.parkNanos(1000000000);
-						}
-					} catch (Exception e) {
-						RoundRobinScheduler.LOGGER.error(
-								"fail to initialize job", e);
-					}
-				}
-			}
-		}, "async-job-initializer").start();
 
 		RoundRobinScheduler.LOGGER.info("start round robin scheduler");
 		this.taskTrackerManager
@@ -232,8 +232,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 		int map_capacity = status.getAvailableMapSlots();
 		int reduce_capacity = status.getAvailableReduceSlots();
 
-		Iterator<JobInProgress> iterator = newJobIterator();
+		Iterator<JobInProgress> iterator = this.newJobIterator();
 		JobInProgress job = null;
+		JobID avoid_infinite_loop_mark = null;
 
 		Task task = null;
 		do {
@@ -243,19 +244,29 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}
 
 			// assigned tasks
-			if ((task = TaskSelector.LocalMap.select(job, status, cluster_size,
-					uniq_hosts)) != null //
-					|| (task = TaskSelector.RackMap.select(job, status,
+			if (map_capacity > 0
+					&& ((task = TaskSelector.LocalMap.select(job, status,
 							cluster_size, uniq_hosts)) != null //
+							|| (task = TaskSelector.RackMap.select(job, status,
+									cluster_size, uniq_hosts)) != null //
 					|| (task = TaskSelector.Map.select(job, status,
 							cluster_size, uniq_hosts)) != null //
-			) {
+					)) {
+				avoid_infinite_loop_mark = null;
 				map_capacity--;
 				assigned.add(task);
-			} else if ((task = TaskSelector.Reduce.select(job, status,
-					cluster_size, uniq_hosts)) != null) {
+			} else if (reduce_capacity > 0
+					&& (task = TaskSelector.Reduce.select(job, status,
+							cluster_size, uniq_hosts)) != null) {
+				avoid_infinite_loop_mark = null;
 				reduce_capacity--;
 				assigned.add(task);
+			} else if (avoid_infinite_loop_mark == null) {
+				// mark void
+				avoid_infinite_loop_mark = job.getJobID();
+			} else if (job.getJobID().equals(avoid_infinite_loop_mark)) {
+				// no more assigned available
+				break;
 			}
 		} while (map_capacity > 0 || reduce_capacity > 0);
 
@@ -282,24 +293,25 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 */
 	protected Iterator<JobInProgress> newJobIterator() {
 		return new Iterator<JobInProgress>() {
-			private Iterator<JobInProgress> delegate = jobs.iterator();
+			private Iterator<JobInProgress> delegate = RoundRobinScheduler.this.jobs
+					.iterator();
 
 			@Override
 			public boolean hasNext() {
-				if (!delegate.hasNext()) {
-					delegate = jobs.iterator();
+				if (!this.delegate.hasNext()) {
+					this.delegate = RoundRobinScheduler.this.jobs.iterator();
 				}
-				return delegate.hasNext();
+				return this.delegate.hasNext();
 			}
 
 			@Override
 			public JobInProgress next() {
-				if (!delegate.hasNext()) {
-					delegate = jobs.iterator();
+				if (!this.delegate.hasNext()) {
+					this.delegate = RoundRobinScheduler.this.jobs.iterator();
 				}
 
 				try {
-					return delegate.next();
+					return this.delegate.next();
 				} catch (NoSuchElementException e) {
 				}
 				return null;
@@ -307,82 +319,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 			@Override
 			public void remove() {
-				delegate.remove();
+				this.delegate.remove();
 			}
 		};
-	}
-
-	/**
-	 * internal assign task according to selector typ
-	 * @param selector
-	 * 		the selector
-	 * @param capacity
-	 * 		the estimate capacity
-	 * @param in_progress
-	 * 		the job
-	 * @param status
-	 * 		the tasktracker status
-	 * @param task_tracker
-	 * 		the number of task tracker
-	 * @param uniq_hosts
-	 * 		the uniq_hosts
-	 * @param assigned
-	 * 		the assigned task
-	 * @return
-	 * 		the number of remained capacity
-	 * @throws IOException
-	 * 		throw when assign fail
-	 */
-	protected int internalAssignTasks(TaskSelector selector, int capacity,
-			TaskTrackerStatus status, int task_tracker, int uniq_hosts,
-			List<Task> assigned) throws IOException {
-		// quick path
-		if (capacity < 1 || status == null || assigned == null) {
-			return capacity;
-		}
-
-		// test if have job in queue
-		Iterator<JobInProgress> in_progress = this.jobs.iterator();
-		JobInProgress job = null;
-		if (in_progress.hasNext()) {
-			try {
-				job = in_progress.next();
-			} catch (NoSuchElementException e) {
-				job = null;
-			}
-		}
-
-		// flag indicate assign one while looping
-		boolean found_one = false;
-		do {
-			// no job
-			if (job == null) {
-				break;
-			}
-
-			// iterate it
-			Task task = selector.select(job, status, task_tracker, uniq_hosts);
-			if (task != null) {
-				assigned.add(task);
-				capacity--;
-				found_one = true;
-			}
-
-			// reach the end,try restart from head if possible
-			if (!in_progress.hasNext() && found_one) {
-				found_one = false;
-				in_progress = this.jobs.iterator();
-			}
-
-			// a little tricky to find next
-			// it is OK if haseNext return false here.
-			try {
-				job = in_progress.next();
-			} catch (NoSuchElementException e) {
-				job = null;
-			}
-		} while (capacity > 0);
-
-		return capacity;
 	}
 }
