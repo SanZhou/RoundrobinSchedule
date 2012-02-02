@@ -224,52 +224,40 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 		// prepare task
 		List<Task> assigned = new LinkedList<Task>();
-		final int task_tracker = this.taskTrackerManager.getClusterStatus()
+		final int cluster_size = this.taskTrackerManager.getClusterStatus()
 				.getTaskTrackers();
 		final int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
 
 		// assign map task
-		TaskSelector selector = TaskSelector.LocalMap;
-		int capacity = status.getAvailableMapSlots();
-		do {
-			// assign map
-			capacity = this.internalAssignTasks(selector, capacity, status,
-					task_tracker, uniq_hosts, assigned);
+		int map_capacity = status.getAvailableMapSlots();
+		int reduce_capacity = status.getAvailableReduceSlots();
 
-			// have remains,try next selector
-			if (capacity > 0) {
-				switch (selector) {
-				case LocalMap:
-					selector = TaskSelector.RackMap;
-					break;
-				case RackMap:
-					selector = TaskSelector.Map;
-					break;
-				case Map:
-					selector = TaskSelector.Reduce;
-					capacity = status.getAvailableReduceSlots();
-					break;
-				case Reduce:
-				default:
-					selector = null;
-					break;
-				}
-			} else {
-				// no remains,try switch mode
-				switch (selector) {
-				case LocalMap:
-				case RackMap:
-				case Map:
-					selector = TaskSelector.Reduce;
-					capacity = status.getAvailableReduceSlots();
-					break;
-				case Reduce:
-				default:
-					selector = null;
-					break;
-				}
+		Iterator<JobInProgress> iterator = newJobIterator();
+		JobInProgress job = null;
+
+		Task task = null;
+		do {
+			// no job
+			if (!iterator.hasNext() || (job = iterator.next()) == null) {
+				break;
 			}
-		} while (selector != null);
+
+			// assigned tasks
+			if ((task = TaskSelector.LocalMap.select(job, status, cluster_size,
+					uniq_hosts)) != null //
+					|| (task = TaskSelector.RackMap.select(job, status,
+							cluster_size, uniq_hosts)) != null //
+					|| (task = TaskSelector.Map.select(job, status,
+							cluster_size, uniq_hosts)) != null //
+			) {
+				map_capacity--;
+				assigned.add(task);
+			} else if ((task = TaskSelector.Reduce.select(job, status,
+					cluster_size, uniq_hosts)) != null) {
+				reduce_capacity--;
+				assigned.add(task);
+			}
+		} while (map_capacity > 0 || reduce_capacity > 0);
 
 		// log informed
 		RoundRobinScheduler.LOGGER.info("assigned task:" + assigned.size()
@@ -285,6 +273,43 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public Collection<JobInProgress> getJobs(String identity) {
 		return new CopyOnWriteArraySet<JobInProgress>(this.jobs);
+	}
+
+	/**
+	 * return the job cycled-iterator
+	 * @return
+	 * 		cycled-iterator,will return null JobInprogress only when there is no job at all
+	 */
+	protected Iterator<JobInProgress> newJobIterator() {
+		return new Iterator<JobInProgress>() {
+			private Iterator<JobInProgress> delegate = jobs.iterator();
+
+			@Override
+			public boolean hasNext() {
+				if (!delegate.hasNext()) {
+					delegate = jobs.iterator();
+				}
+				return delegate.hasNext();
+			}
+
+			@Override
+			public JobInProgress next() {
+				if (!delegate.hasNext()) {
+					delegate = jobs.iterator();
+				}
+
+				try {
+					return delegate.next();
+				} catch (NoSuchElementException e) {
+				}
+				return null;
+			}
+
+			@Override
+			public void remove() {
+				delegate.remove();
+			}
+		};
 	}
 
 	/**
