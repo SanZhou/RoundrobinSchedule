@@ -104,7 +104,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			new Thread(new Runnable() {
 				@Override
 				public void run() {
-					while (true) {
+					for(;;) {
 						try {
 							JobInProgress job = poll();
 							if (job != null) {
@@ -122,6 +122,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}, "async-job-initializer").start();
 		}
 	};
+	
 	private Set<JobInProgress> jobs = new ConcurrentSkipListSet<JobInProgress>(
 			new Comparator<JobInProgress>() {
 				private int translatePriority(JobPriority priority) {
@@ -191,7 +192,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 							}
 						}
 					}
-
+					
 					@Override
 					public void jobRemoved(JobInProgress job) {
 						RoundRobinScheduler.LOGGER.info("remove job	" + job);
@@ -216,9 +217,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 */
 	@Override
 	public List<Task> assignTasks(TaskTracker tasktracker) throws IOException {
-
 		TaskTrackerStatus status = tasktracker.getStatus();
-
 		RoundRobinScheduler.LOGGER.info("assign tasks for "
 				+ status.getTrackerName());
 
