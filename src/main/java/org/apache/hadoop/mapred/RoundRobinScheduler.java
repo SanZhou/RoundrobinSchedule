@@ -91,8 +91,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 				return job.obtainNewNonLocalMapTask(status, cluster_size,
 						uniq_hosts);
 			case Reduce:
-				return job
-						.obtainNewReduceTask(status, cluster_size, uniq_hosts);
+				return job.getStatus().mapProgress() > job.getJobConf()
+						.getFloat("mapred.reduce.slowstart.completed.maps", 0.7f) ? job.obtainNewReduceTask(status,
+						cluster_size, uniq_hosts) : null;
 			}
 			return null;
 		};
@@ -104,7 +105,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			new Thread(new Runnable() {
 				@Override
 				public void run() {
-					for(;;) {
+					for (;;) {
 						try {
 							JobInProgress job = poll();
 							if (job != null) {
@@ -122,7 +123,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}, "async-job-initializer").start();
 		}
 	};
-	
+
 	private Set<JobInProgress> jobs = new ConcurrentSkipListSet<JobInProgress>(
 			new Comparator<JobInProgress>() {
 				private int translatePriority(JobPriority priority) {
@@ -192,7 +193,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 							}
 						}
 					}
-					
+
 					@Override
 					public void jobRemoved(JobInProgress job) {
 						RoundRobinScheduler.LOGGER.info("remove job	" + job);
