@@ -91,9 +91,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 				return job.obtainNewNonLocalMapTask(status, cluster_size,
 						uniq_hosts);
 			case Reduce:
-				return job.getStatus().mapProgress() > job.getJobConf()
-						.getFloat("mapred.reduce.slowstart.completed.maps", 0.7f) ? job.obtainNewReduceTask(status,
-						cluster_size, uniq_hosts) : null;
+				return job.obtainNewReduceTask(status,
+						cluster_size, uniq_hosts);
 			}
 			return null;
 		};
