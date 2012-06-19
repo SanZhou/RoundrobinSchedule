@@ -92,10 +92,12 @@ public class RoundRobinScheduler extends TaskScheduler {
 						uniq_hosts);
 			case Reduce:
 				return job.getStatus().mapProgress() > job.getJobConf()
-						.getFloat("mapred.reduce.slowstart.completed.maps", 0.7f) 
-						|| job.desiredMaps() <= 0 // some job may not have maptasks 
-						? job.obtainNewReduceTask(status,
-						cluster_size, uniq_hosts) : null;
+						.getFloat("mapred.reduce.slowstart.completed.maps",
+								0.7f)
+						|| job.desiredMaps() <= 0 // some job may not have
+													// maptasks
+				? job.obtainNewReduceTask(status, cluster_size, uniq_hosts)
+						: null;
 			}
 			return null;
 		};
@@ -231,8 +233,10 @@ public class RoundRobinScheduler extends TaskScheduler {
 		final int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
 
 		// assign map task
-		int map_capacity = status.getAvailableMapSlots();
-		int reduce_capacity = status.getAvailableReduceSlots();
+		int map_capacity = status.getAvailableMapSlots() > 0 ? status
+				.getMaxMapSlots() : status.getAvailableMapSlots();
+		int reduce_capacity = status.getAvailableReduceSlots() > 0 ? status
+				.getMaxReduceSlots() : status.getAvailableReduceSlots();
 
 		Iterator<JobInProgress> iterator = this.newJobIterator();
 		JobInProgress job = null;
