@@ -98,25 +98,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 			}
 			return null;
 		};
-
-		/**
-		 * advance to next level
-		 * @return
-		 * 		the next level if exist
-		 */
-		public TaskSelector nextLevel() {
-			switch (this) {
-			case Reduce:
-				return LocalMap;
-			case LocalMap:
-				return RackMap;
-			case RackMap:
-				return Map;
-			case Map:
-			default:
-				return null;
-			}
-		}
 	}
 
 	private Set<JobInProgress> jobs = new ConcurrentSkipListSet<JobInProgress>(
@@ -251,10 +232,12 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if ((task = selector.select(job, status, cluster_size, uniq_hosts)) != null) {
 				// assign and count down
 				assigned.add(task);
-				if (selector == TaskSelector.Reduce) {
-					reduce_capacity--;
-				} else {
-					map_capacity--;
+				if (selector == TaskSelector.Reduce && --reduce_capacity <= 0) {
+					// no reduces available
+					selector = TaskSelector.LocalMap;
+				} else if (--map_capacity <= 0) {
+					// end assign
+					break;
 				}
 			} else // no task ,see if this job has been seem before
 			if (avoid_infinite_loop_mark == null) {
@@ -263,7 +246,23 @@ public class RoundRobinScheduler extends TaskScheduler {
 			} else if (avoid_infinite_loop_mark.equals(job.getJobID())) {
 				// see it before,may be we loop back
 				// try advance next level`s selector
-				selector = selector.nextLevel();
+				switch (selector) {
+				case Reduce:
+					selector = TaskSelector.Map;
+					break;
+				case LocalMap:
+					selector = TaskSelector.RackMap;
+					break;
+				case RackMap:
+					selector = TaskSelector.Map;
+					break;
+				case Map:
+				default:
+					selector = null;
+					break;
+				}
+
+				// check
 				if (selector == null) {
 					// all level finished
 					break;
