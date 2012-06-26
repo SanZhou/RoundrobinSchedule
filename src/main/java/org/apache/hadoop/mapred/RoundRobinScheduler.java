@@ -225,9 +225,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 		// assign map task
 		int map_capacity = status.getAvailableMapSlots() > 0 ? status
-				.getMaxMapSlots() : status.getAvailableMapSlots();
+				.getMaxMapSlots() : 0;
 		int reduce_capacity = status.getAvailableReduceSlots() > 0 ? status
-				.getMaxReduceSlots() : status.getAvailableReduceSlots();
+				.getMaxReduceSlots() : 0;
 
 		Iterator<JobInProgress> iterator = this.newJobIterator();
 		if (iterator == null) {
