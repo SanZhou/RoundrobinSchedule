@@ -248,7 +248,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 				// try advance next level`s selector
 				switch (selector) {
 				case Reduce:
-					selector = TaskSelector.Map;
+					selector = TaskSelector.LocalMap;
 					break;
 				case LocalMap:
 					selector = TaskSelector.RackMap;
