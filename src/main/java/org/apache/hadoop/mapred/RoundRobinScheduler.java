@@ -33,12 +33,9 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Queue;
 import java.util.Set;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.locks.LockSupport;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -95,38 +92,32 @@ public class RoundRobinScheduler extends TaskScheduler {
 						.getFloat("mapred.reduce.slowstart.completed.maps",
 								0.7f)
 						|| job.desiredMaps() <= 0 // some job may not have
-													// maptasks
+													// map tasks
 				? job.obtainNewReduceTask(status, cluster_size, uniq_hosts)
 						: null;
 			}
 			return null;
 		};
-	}
 
-	private Queue<JobInProgress> initialize_queue = new ConcurrentLinkedQueue<JobInProgress>() {
-		private static final long serialVersionUID = 72287877066765720L;
-		{
-			new Thread(new Runnable() {
-				@Override
-				public void run() {
-					for (;;) {
-						try {
-							JobInProgress job = poll();
-							if (job != null) {
-								RoundRobinScheduler.this.taskTrackerManager.initJob(job);
-								RoundRobinScheduler.this.jobs.add(job);
-							} else {
-								LockSupport.parkNanos(1000000000);
-							}
-						} catch (Exception e) {
-							RoundRobinScheduler.LOGGER.error(
-									"fail to initialize job", e);
-						}
-					}
-				}
-			}, "async-job-initializer").start();
+		/**
+		 * advance to next level
+		 * @return
+		 * 		the next level if exist
+		 */
+		public TaskSelector nextLevel() {
+			switch (this) {
+			case Reduce:
+				return LocalMap;
+			case LocalMap:
+				return RackMap;
+			case RackMap:
+				return Map;
+			case Map:
+			default:
+				return null;
+			}
 		}
-	};
+	}
 
 	private Set<JobInProgress> jobs = new ConcurrentSkipListSet<JobInProgress>(
 			new Comparator<JobInProgress>() {
@@ -209,9 +200,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 							throws IOException {
 						RoundRobinScheduler.LOGGER.info("add job " + job);
 						if (job != null) {
-							// sumbit async
-							RoundRobinScheduler.this.initialize_queue
-									.offer(job);
+							RoundRobinScheduler.this.taskTrackerManager
+									.initJob(job);
+							RoundRobinScheduler.this.jobs.add(job);
 						}
 					}
 				});
@@ -239,42 +230,46 @@ public class RoundRobinScheduler extends TaskScheduler {
 				.getMaxReduceSlots() : status.getAvailableReduceSlots();
 
 		Iterator<JobInProgress> iterator = this.newJobIterator();
+		if (iterator == null) {
+			LOGGER.error("instant job interator fail");
+			return assigned;
+		}
+
+		// init level
+		TaskSelector selector = TaskSelector.Reduce;
+
 		JobInProgress job = null;
+		Task task = null;
 		JobID avoid_infinite_loop_mark = null;
 
-		Task task = null;
-		do {
-			// no job
+		while (map_capacity > 0 || reduce_capacity > 0) {
 			if (!iterator.hasNext() || (job = iterator.next()) == null) {
+				// no jobs
 				break;
 			}
 
-			// assigned tasks
-			if (map_capacity > 0
-					&& ((task = TaskSelector.LocalMap.select(job, status,
-							cluster_size, uniq_hosts)) != null //
-							|| (task = TaskSelector.RackMap.select(job, status,
-									cluster_size, uniq_hosts)) != null //
-					|| (task = TaskSelector.Map.select(job, status,
-							cluster_size, uniq_hosts)) != null //
-					)) {
-				avoid_infinite_loop_mark = null;
-				map_capacity--;
+			if ((task = selector.select(job, status, cluster_size, uniq_hosts)) != null) {
+				// assign and count down
 				assigned.add(task);
-			} else if (reduce_capacity > 0
-					&& (task = TaskSelector.Reduce.select(job, status,
-							cluster_size, uniq_hosts)) != null) {
-				avoid_infinite_loop_mark = null;
-				reduce_capacity--;
-				assigned.add(task);
-			} else if (avoid_infinite_loop_mark == null) {
-				// mark void
+				if (selector == TaskSelector.Reduce) {
+					reduce_capacity--;
+				} else {
+					map_capacity--;
+				}
+			} else // no task ,see if this job has been seem before
+			if (avoid_infinite_loop_mark == null) {
+				// not see yet,mark it
 				avoid_infinite_loop_mark = job.getJobID();
-			} else if (job.getJobID().equals(avoid_infinite_loop_mark)) {
-				// no more assigned available
-				break;
+			} else if (avoid_infinite_loop_mark.equals(job.getJobID())) {
+				// see it before,may be we loop back
+				// try advance next level`s selector
+				selector = selector.nextLevel();
+				if (selector == null) {
+					// all level finished
+					break;
+				}
 			}
-		} while (map_capacity > 0 || reduce_capacity > 0);
+		}
 
 		// log informed
 		RoundRobinScheduler.LOGGER.info("assigned task:" + assigned.size()
