@@ -205,55 +205,61 @@ public class RoundRobinScheduler extends TaskScheduler {
 		final int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
 
 		// assign map task
-		int map_capacity = status.getAvailableMapSlots() * 2 >= status
-				.getMaxMapSlots() ? status.getMaxMapSlots() : status
-				.getAvailableMapSlots();
-		int reduce_capacity = status.getAvailableReduceSlots() * 2 >= status
-				.getMaxReduceSlots() ? status.getMaxReduceSlots() : status
-				.getAvailableReduceSlots();
+		int map_capacity = status.getAvailableMapSlots() > 0 ? status
+				.getMaxMapSlots() : 0;
+		int reduce_capacity = status.getAvailableReduceSlots() > 0 ? status
+				.getMaxReduceSlots() : 0;
 
 		Iterator<JobInProgress> iterator = this.newJobIterator();
 		if (iterator == null) {
-			LOGGER.error("instant job interator fail");
+			RoundRobinScheduler.LOGGER.error("instant job interator fail");
 			return assigned;
 		}
-
-		// init level
-		TaskSelector selector = TaskSelector.Reduce;
 
 		JobInProgress job = null;
 		Task task = null;
 		JobID avoid_infinite_loop_mark = null;
+		TaskSelector selector = null;
+		int capacity = 0;
 
-		while (map_capacity > 0 || reduce_capacity > 0) {
+		// kickstart
+		if (map_capacity > 0) {
+			selector = TaskSelector.LocalMap;
+			capacity = map_capacity;
+		} else {
+			selector = TaskSelector.Reduce;
+			capacity = reduce_capacity;
+		}
+
+		// assign
+		while (capacity > 0) {
 			if (!iterator.hasNext() || (job = iterator.next()) == null) {
-				// no jobs
+				// temporary no jobs
 				break;
 			}
 
 			if ((task = selector.select(job, status, cluster_size, uniq_hosts)) != null) {
-				// assign and count down
 				assigned.add(task);
+				capacity--;
+
+				// backtrack bookkeeping
 				if (selector == TaskSelector.Reduce) {
-					if (--reduce_capacity <= 0) {
-						// no reduces available
-						selector = TaskSelector.LocalMap;
-					}
-				} else if (--map_capacity <= 0) {
-					// end assign
-					break;
+					reduce_capacity--;
+				} else if (map_capacity-- <= 0) {
+					// no map remains,switch to reduce mode
+					selector = TaskSelector.Reduce;
+					capacity = reduce_capacity;
+
+					// clear mark
+					avoid_infinite_loop_mark = null;
 				}
 			} else // no task ,see if this job has been seem before
 			if (avoid_infinite_loop_mark == null) {
 				// not see yet,mark it
 				avoid_infinite_loop_mark = job.getJobID();
 			} else if (avoid_infinite_loop_mark.equals(job.getJobID())) {
-				// see it before,may be we loop back
-				// try advance next level`s selector
+				// loop back,switch to next level,and retry
 				switch (selector) {
-				case Reduce:
-					selector = TaskSelector.LocalMap;
-					break;
 				case LocalMap:
 					selector = TaskSelector.RackMap;
 					break;
@@ -261,16 +267,18 @@ public class RoundRobinScheduler extends TaskScheduler {
 					selector = TaskSelector.Map;
 					break;
 				case Map:
+					selector = TaskSelector.Reduce;
+					// switch capacity to reduce capacity
+					capacity = reduce_capacity;
+					break;
+				case Reduce:
 				default:
-					selector = null;
+					capacity = 0;
 					break;
 				}
 
-				// check
-				if (selector == null) {
-					// all level finished
-					break;
-				}
+				// clear mark
+				avoid_infinite_loop_mark = null;
 			}
 		}
 
