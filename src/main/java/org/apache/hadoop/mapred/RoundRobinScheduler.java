@@ -205,8 +205,12 @@ public class RoundRobinScheduler extends TaskScheduler {
 		final int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
 
 		// assign map task
-		int map_capacity = status.getAvailableMapSlots();
-		int reduce_capacity = status.getAvailableReduceSlots();
+		int map_capacity = status.getAvailableMapSlots() * 2 >= status
+				.getMaxMapSlots() ? status.getMaxMapSlots() : status
+				.getAvailableMapSlots();
+		int reduce_capacity = status.getAvailableReduceSlots() * 2 >= status
+				.getMaxReduceSlots() ? status.getMaxReduceSlots() : status
+				.getAvailableReduceSlots();
 
 		Iterator<JobInProgress> iterator = this.newJobIterator();
 		if (iterator == null) {
@@ -230,9 +234,11 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if ((task = selector.select(job, status, cluster_size, uniq_hosts)) != null) {
 				// assign and count down
 				assigned.add(task);
-				if (selector == TaskSelector.Reduce && --reduce_capacity <= 0) {
-					// no reduces available
-					selector = TaskSelector.LocalMap;
+				if (selector == TaskSelector.Reduce) {
+					if (--reduce_capacity <= 0) {
+						// no reduces available
+						selector = TaskSelector.LocalMap;
+					}
 				} else if (--map_capacity <= 0) {
 					// end assign
 					break;
