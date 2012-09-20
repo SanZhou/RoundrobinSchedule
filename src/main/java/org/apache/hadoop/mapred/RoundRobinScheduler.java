@@ -211,6 +211,11 @@ public class RoundRobinScheduler extends TaskScheduler {
 		int map_capacity = status.getAvailableMapSlots();
 		int reduce_capacity = status.getAvailableReduceSlots();
 
+		// optimize case
+		if (map_capacity <= 0 && reduce_capacity <= 0) {
+			return assigned;
+		}
+
 		Iterator<JobInProgress> iterator = this.newJobIterator();
 		if (iterator == null) {
 			RoundRobinScheduler.LOGGER.error("instant job interator fail");
@@ -245,16 +250,16 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 				// backtrack bookkeeping
 				if (selector == TaskSelector.Reduce) {
-					assigned_reduce++;
-					reduce_capacity--;
-				} else if (map_capacity-- <= 0) {
+					++assigned_reduce;
+					--reduce_capacity;
+				} else if (--map_capacity <= 0) {
 					// no map remains,switch to reduce mode
 					selector = TaskSelector.Reduce;
 					capacity = reduce_capacity;
-
-					// clear mark
-					avoid_infinite_loop_mark = null;
 				}
+
+				// clear mark
+				avoid_infinite_loop_mark = null;
 			} else // no task ,see if this job has been seem before
 			if (avoid_infinite_loop_mark == null) {
 				// not see yet,mark it
@@ -279,7 +284,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 					break;
 				}
 
-				// clear mark
+				// clear mark,as the selector may already changed mode
 				avoid_infinite_loop_mark = null;
 			}
 		}
