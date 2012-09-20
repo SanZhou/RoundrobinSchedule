@@ -34,11 +34,8 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Set;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -55,9 +52,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 	private static final Log LOGGER = LogFactory
 			.getLog(RoundRobinScheduler.class);
-
-	private static final ExecutorService SERVICE = Executors
-			.newCachedThreadPool();
 
 	/**
 	 * shortcut task selector
@@ -188,14 +182,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 							throws IOException {
 						RoundRobinScheduler.LOGGER.info("add job " + job);
 						if (job != null) {
-							SERVICE.execute(new Runnable() {
-								@Override
-								public void run() {
-									RoundRobinScheduler.this.taskTrackerManager
-											.initJob(job);
-									RoundRobinScheduler.this.jobs.add(job);
-								}
-							});
+							RoundRobinScheduler.this.taskTrackerManager
+									.initJob(job);
+							RoundRobinScheduler.this.jobs.add(job);
 						}
 					}
 				});
@@ -205,29 +194,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 * {@inheritDoc}
 	 */
 	@Override
-	public List<Task> assignTasks(final TaskTracker tasktracker)
-			throws IOException {
-		List<Task> assigned = null;
-		try {
-			assigned = SERVICE.submit(new Callable<List<Task>>() {
-				@Override
-				public List<Task> call() throws Exception {
-					return subAssignTasks(tasktracker);
-				}
-			}).get();
-		} catch (Exception e) {
-			LOGGER.error("async assign task fail", e);
-			assigned = new LinkedList<Task>();
-		}
-
-		return assigned;
-	}
-
-	/**
-	 * assign task
-	 */
-	public List<Task> subAssignTasks(TaskTracker tasktracker)
-			throws IOException {
+	public List<Task> assignTasks(TaskTracker tasktracker) throws IOException {
 		TaskTrackerStatus status = tasktracker.getStatus();
 		RoundRobinScheduler.LOGGER.info("assign tasks for "
 				+ status.getTrackerName());
