@@ -34,8 +34,11 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -53,8 +56,12 @@ public class RoundRobinScheduler extends TaskScheduler {
 	private static final Log LOGGER = LogFactory
 			.getLog(RoundRobinScheduler.class);
 
+	private static final ExecutorService SERVICE = Executors
+			.newCachedThreadPool();
+
 	/**
 	 * shortcut task selector
+	 * 
 	 * @author <a href="mailto:zhizhong.qiu@happyelements.com">kevin</a>
 	 */
 	public static enum TaskSelector {
@@ -62,18 +69,18 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 		/**
 		 * select a task accroding self type
+		 * 
 		 * @param job
-		 * 		the job tips
+		 *            the job tips
 		 * @param status
-		 * 		the tasktracker status
+		 *            the tasktracker status
 		 * @param cluster_size
-		 * 		the cluster size
+		 *            the cluster size
 		 * @param uniq_hosts
-		 * 		uniq hosts
-		 * @return
-		 * 		the task selected ,null if none
+		 *            uniq hosts
+		 * @return the task selected ,null if none
 		 * @throws IOException
-		 * 		throw when obtain task fail
+		 *             throw when obtain task fail
 		 */
 		Task select(JobInProgress job, TaskTrackerStatus status,
 				int cluster_size, int uniq_hosts) throws IOException {
@@ -181,9 +188,14 @@ public class RoundRobinScheduler extends TaskScheduler {
 							throws IOException {
 						RoundRobinScheduler.LOGGER.info("add job " + job);
 						if (job != null) {
-							RoundRobinScheduler.this.taskTrackerManager
-									.initJob(job);
-							RoundRobinScheduler.this.jobs.add(job);
+							SERVICE.execute(new Runnable() {
+								@Override
+								public void run() {
+									RoundRobinScheduler.this.taskTrackerManager
+											.initJob(job);
+									RoundRobinScheduler.this.jobs.add(job);
+								}
+							});
 						}
 					}
 				});
@@ -193,10 +205,34 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 * {@inheritDoc}
 	 */
 	@Override
-	public List<Task> assignTasks(TaskTracker tasktracker) throws IOException {
+	public List<Task> assignTasks(final TaskTracker tasktracker)
+			throws IOException {
+		List<Task> assigned = null;
+		try {
+			assigned = SERVICE.submit(new Callable<List<Task>>() {
+				@Override
+				public List<Task> call() throws Exception {
+					return subAssignTasks(tasktracker);
+				}
+			}).get();
+		} catch (Exception e) {
+			LOGGER.error("async assign task fail", e);
+			assigned = new LinkedList<Task>();
+		}
+
+		return assigned;
+	}
+
+	/**
+	 * assign task
+	 */
+	public List<Task> subAssignTasks(TaskTracker tasktracker)
+			throws IOException {
 		TaskTrackerStatus status = tasktracker.getStatus();
 		RoundRobinScheduler.LOGGER.info("assign tasks for "
 				+ status.getTrackerName());
+
+		int assigned_reduce = 0;
 
 		// prepare task
 		List<Task> assigned = new LinkedList<Task>();
@@ -242,6 +278,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 				// backtrack bookkeeping
 				if (selector == TaskSelector.Reduce) {
+					assigned_reduce++;
 					reduce_capacity--;
 				} else if (map_capacity-- <= 0) {
 					// no map remains,switch to reduce mode
@@ -282,8 +319,10 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 		// log informed
 		RoundRobinScheduler.LOGGER.info("assigned task:" + assigned.size()
-				+ " map_capacity:" + status.getAvailableMapSlots()
-				+ " reduce_capacity:" + status.getAvailableReduceSlots());
+				+ " assign map:" + (assigned.size() - assigned_reduce)
+				+ " assign redcue:" + assigned_reduce + " map_capacity:"
+				+ status.getAvailableMapSlots() + " reduce_capacity:"
+				+ status.getAvailableReduceSlots());
 
 		return assigned;
 	}
@@ -298,8 +337,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 	/**
 	 * return the job cycled-iterator
-	 * @return
-	 * 		cycled-iterator,will return null JobInprogress only when there is no job at all
+	 * 
+	 * @return cycled-iterator,will return null JobInprogress only when there is
+	 *         no job at all
 	 */
 	protected Iterator<JobInProgress> newJobIterator() {
 		return new Iterator<JobInProgress>() {
