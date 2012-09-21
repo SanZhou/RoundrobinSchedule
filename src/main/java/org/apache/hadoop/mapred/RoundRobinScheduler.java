@@ -225,6 +225,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 			capacity = reduce_capacity;
 		} else {
 			// optimize case,no map/reduce available
+			RoundRobinScheduler.LOGGER.info("no capacity,map_capacity:"
+					+ map_capacity + " reduce_capacity:" + reduce_capacity);
 			return RoundRobinScheduler.EMPTY_TASK_LIST;
 		}
 
