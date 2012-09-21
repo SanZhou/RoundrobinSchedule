@@ -230,6 +230,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		Task task = null;
 		JobID avoid_infinite_loop_mark = null;
 		TaskSelector selector = null;
+		TaskSelector temporary_reduce_swtich = null;
 		int capacity = 0;
 
 		// kick start capacity
@@ -272,19 +273,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 			if ((job.getStatus().mapProgress() >= 1.0f //
 					|| job.desiredMaps() <= 0)//
 					&& selector != TaskSelector.Reduce) {
-				// select a reduce task
-				if ((task = TaskSelector.Reduce.select(job, status,
-						cluster_size, uniq_hosts)) != null) {
-					// DO NOT FORGET TO UPDATE BOOKKEEPING STATUS
-					assigned.add(task);
-					--reduce_capacity;
-					++assigned_reduce;
-
-					// clear mark
-					avoid_infinite_loop_mark = null;
-				}
-
-				continue;
+				temporary_reduce_swtich = selector;
+				selector = TaskSelector.Reduce;
+				capacity = reduce_capacity;
 			}
 
 			if ((task = selector.select(job, status, cluster_size, uniq_hosts)) != null) {
@@ -330,6 +321,14 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 				// clear mark,as the selector may already changed mode
 				avoid_infinite_loop_mark = null;
+			}
+
+			// if a reduce selector switch occurs,
+			// switch back to map selector
+			if (temporary_reduce_swtich != null) {
+				selector = temporary_reduce_swtich;
+				temporary_reduce_swtich = null;
+				capacity = map_capacity;
 			}
 		}
 
