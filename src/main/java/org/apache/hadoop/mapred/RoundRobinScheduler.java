@@ -294,11 +294,18 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 				// clear mark
 				avoid_infinite_loop_mark = null;
-			} else // no task ,see if this job has been seem before
-			if (avoid_infinite_loop_mark == null) {
-				// not see yet,mark it
+			} else if (avoid_infinite_loop_mark == null) {
+				// not seen yet,mark it
 				avoid_infinite_loop_mark = job.getJobID();
 			} else if (avoid_infinite_loop_mark.equals(job.getJobID())) {
+				// if a reduce selector switch occurs,
+				// switch back to map selector
+				if (temporary_reduce_swtich != null) {
+					selector = temporary_reduce_swtich;
+					temporary_reduce_swtich = null;
+					capacity = map_capacity;
+				}
+				
 				// loop back,switch to next level,and retry
 				switch (selector) {
 				case LocalMap:
