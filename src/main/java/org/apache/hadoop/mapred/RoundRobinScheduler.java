@@ -27,7 +27,9 @@
 package org.apache.hadoop.mapred;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -36,6 +38,7 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -52,6 +55,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 	private static final Log LOGGER = LogFactory
 			.getLog(RoundRobinScheduler.class);
+
+	private static final List<Task> EMPTY_TASK_LIST = Collections
+			.unmodifiableList(new ArrayList<Task>(0));
 
 	/**
 	 * shortcut task selector
@@ -138,6 +144,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 				}
 			});
 
+	private AtomicInteger job_counts;
+
 	/**
 	 * {@inheritDoc}
 	 * 
@@ -146,6 +154,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public void start() throws IOException {
 		super.start();
+
+		this.job_counts = new AtomicInteger(0);
 
 		RoundRobinScheduler.LOGGER.info("start round robin scheduler");
 		this.taskTrackerManager
@@ -175,6 +185,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 					public void jobRemoved(JobInProgress job) {
 						RoundRobinScheduler.LOGGER.info("remove job	" + job);
 						RoundRobinScheduler.this.jobs.remove(job);
+						// decrease it later,as it will not make any serious
+						// problem if fail
+						job_counts.decrementAndGet();
 					}
 
 					@Override
@@ -185,6 +198,10 @@ public class RoundRobinScheduler extends TaskScheduler {
 							RoundRobinScheduler.this.taskTrackerManager
 									.initJob(job);
 							RoundRobinScheduler.this.jobs.add(job);
+
+							// increase later,as CAS operation may cause
+							// contention
+							job_counts.incrementAndGet();
 						}
 					}
 				});
@@ -195,53 +212,79 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 */
 	@Override
 	public List<Task> assignTasks(TaskTracker tasktracker) throws IOException {
+		// easy case,no jobs
+		if (job_counts.get() <= 0) {
+			return EMPTY_TASK_LIST;
+		}
+
+		// fetch tracker status
 		TaskTrackerStatus status = tasktracker.getStatus();
-		RoundRobinScheduler.LOGGER.info("assign tasks for "
-				+ status.getTrackerName());
-
-		int assigned_reduce = 0;
-
-		// prepare task
-		List<Task> assigned = new LinkedList<Task>();
 		final int cluster_size = this.taskTrackerManager.getClusterStatus()
 				.getTaskTrackers();
 		final int uniq_hosts = this.taskTrackerManager.getNumberOfUniqueHosts();
 
-		// assign map task
+		// bookkeeping
+		int assigned_reduce = 0;
 		int map_capacity = status.getAvailableMapSlots();
 		int reduce_capacity = status.getAvailableReduceSlots();
-
-		// optimize case
-		if (map_capacity <= 0 && reduce_capacity <= 0) {
-			return assigned;
-		}
-
-		Iterator<JobInProgress> iterator = this.newJobIterator();
-		if (iterator == null) {
-			RoundRobinScheduler.LOGGER.error("instant job interator fail");
-			return assigned;
-		}
-
 		JobInProgress job = null;
 		Task task = null;
 		JobID avoid_infinite_loop_mark = null;
 		TaskSelector selector = null;
 		int capacity = 0;
 
-		// kickstart
+		// kick start capacity
 		if (map_capacity > 0) {
 			selector = TaskSelector.LocalMap;
 			capacity = map_capacity;
-		} else {
+		} else if (reduce_capacity > 0) {
 			selector = TaskSelector.Reduce;
 			capacity = reduce_capacity;
+		} else {
+			// optimize case,no map/reduce available
+			return EMPTY_TASK_LIST;
 		}
+
+		// make iterator
+		Iterator<JobInProgress> iterator = this.newJobIterator();
+		if (iterator == null) {
+			RoundRobinScheduler.LOGGER.error("instant job interator fail");
+			return EMPTY_TASK_LIST;
+		}
+
+		// lazy initial tasks
+		List<Task> assigned = new LinkedList<Task>();
+
+		// delay logging until here
+		RoundRobinScheduler.LOGGER.info("assign tasks for "
+				+ status.getTrackerName());
 
 		// assign
 		while (capacity > 0) {
 			if (!iterator.hasNext() || (job = iterator.next()) == null) {
 				// temporary no jobs
 				break;
+			}
+
+			// optimize case:
+			// when map already finished or there is no map task,switch to
+			// reduce case temporary
+			if ((job.getStatus().mapProgress() >= 1.0f //
+					|| job.desiredMaps() <= 0)//
+					&& selector != TaskSelector.Reduce) {
+				// select a reduce task
+				if ((task = TaskSelector.Reduce.select(job, status,
+						cluster_size, uniq_hosts)) != null) {
+					// DO NOT FORGET TO UPDATE BOOKKEEPING STATUS
+					assigned.add(task);
+					--reduce_capacity;
+					++assigned_reduce;
+
+					// clear mark
+					avoid_infinite_loop_mark = null;
+				}
+
+				continue;
 			}
 
 			if ((task = selector.select(job, status, cluster_size, uniq_hosts)) != null) {
@@ -280,6 +323,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 					break;
 				case Reduce:
 				default:
+					// tricky way to stop the loop
 					capacity = 0;
 					break;
 				}
@@ -290,11 +334,11 @@ public class RoundRobinScheduler extends TaskScheduler {
 		}
 
 		// log informed
-		RoundRobinScheduler.LOGGER.info("assigned task:" + assigned.size()
-				+ " assign map:" + (assigned.size() - assigned_reduce)
-				+ " assign redcue:" + assigned_reduce + " map_capacity:"
-				+ status.getAvailableMapSlots() + " reduce_capacity:"
-				+ status.getAvailableReduceSlots());
+		RoundRobinScheduler.LOGGER.info("assigned task:" + assigned.size() //
+				+ " assign map:" + (assigned.size() - assigned_reduce) //
+				+ " assign redcue:" + assigned_reduce //
+				+ " map_capacity:" + status.getAvailableMapSlots() //
+				+ " reduce_capacity:" + status.getAvailableReduceSlots());
 
 		return assigned;
 	}
@@ -335,8 +379,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 				try {
 					return this.delegate.next();
 				} catch (NoSuchElementException e) {
+					return null;
 				}
-				return null;
 			}
 
 			@Override
