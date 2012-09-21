@@ -253,7 +253,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 		}
 
 		// lazy initial tasks
-		List<Task> assigned = new LinkedList<Task>();
+		List<Task> assigned = new ArrayList<Task>(map_capacity
+				+ reduce_capacity);
 
 		// delay logging until here
 		RoundRobinScheduler.LOGGER.info("assign tasks for "
