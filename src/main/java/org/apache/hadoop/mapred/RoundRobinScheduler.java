@@ -186,7 +186,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 						RoundRobinScheduler.this.jobs.remove(job);
 						// decrease it later,as it will not make any serious
 						// problem if fail
-						job_counts.decrementAndGet();
+						RoundRobinScheduler.this.job_counts.decrementAndGet();
 					}
 
 					@Override
@@ -200,7 +200,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 							// increase later,as CAS operation may cause
 							// contention
-							job_counts.incrementAndGet();
+							RoundRobinScheduler.this.job_counts
+									.incrementAndGet();
 						}
 					}
 				});
@@ -212,8 +213,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public List<Task> assignTasks(TaskTracker tasktracker) throws IOException {
 		// easy case,no jobs
-		if (job_counts.get() <= 0) {
-			return EMPTY_TASK_LIST;
+		if (this.job_counts.get() <= 0) {
+			return RoundRobinScheduler.EMPTY_TASK_LIST;
 		}
 
 		// fetch tracker status
@@ -242,19 +243,19 @@ public class RoundRobinScheduler extends TaskScheduler {
 			capacity = reduce_capacity;
 		} else {
 			// optimize case,no map/reduce available
-			return EMPTY_TASK_LIST;
+			return RoundRobinScheduler.EMPTY_TASK_LIST;
 		}
 
 		// make iterator
 		Iterator<JobInProgress> iterator = this.newJobIterator();
 		if (iterator == null) {
 			RoundRobinScheduler.LOGGER.error("instant job interator fail");
-			return EMPTY_TASK_LIST;
+			return RoundRobinScheduler.EMPTY_TASK_LIST;
 		}
 
 		// lazy initial tasks
-		List<Task> assigned = new ArrayList<Task>(map_capacity
-				+ reduce_capacity);
+		int total = map_capacity + reduce_capacity;
+		List<Task> assigned = new ArrayList<Task>(total <= 0 ? 0 : total);
 
 		// delay logging until here
 		RoundRobinScheduler.LOGGER.info("assign tasks for "
@@ -305,7 +306,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 					temporary_reduce_swtich = null;
 					capacity = map_capacity;
 				}
-				
+
 				// loop back,switch to next level,and retry
 				switch (selector) {
 				case LocalMap:
