@@ -215,9 +215,11 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public List<Task> assignTasks(TaskTracker tasktracker) throws IOException {
 		// easy case,no jobs
-		if (this.job_counts.get() <= 0) {
+		int current_count = this.job_counts.get();
+		if (current_count <= 0) {
 			RoundRobinScheduler.LOGGER
-					.info("assign null,as the job tracking counter indicate no jobs");
+					.info("assign null,as the job tracking counter indicate no jobs,counter:"
+							+ current_count);
 			return RoundRobinScheduler.EMPTY_TASK_LIST;
 		}
 
