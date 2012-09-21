@@ -273,7 +273,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 			// reduce case temporary
 			if ((job.getStatus().mapProgress() >= 1.0f //
 					|| job.desiredMaps() <= 0)//
-					&& selector != TaskSelector.Reduce) {
+					&& selector != TaskSelector.Reduce//
+					&& reduce_capacity > 0) {
 				temporary_reduce_swtich = selector;
 				selector = TaskSelector.Reduce;
 				capacity = reduce_capacity;
