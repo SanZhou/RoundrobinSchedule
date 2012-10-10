@@ -33,13 +33,12 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
+import java.util.NavigableSet;
 import java.util.NoSuchElementException;
 import java.util.Queue;
-import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 
 import org.apache.commons.logging.Log;
@@ -102,7 +101,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 		};
 	}
 
-	private Set<JobInProgress> jobs = new ConcurrentSkipListSet<JobInProgress>(
+	private NavigableSet<JobInProgress> jobs = new ConcurrentSkipListSet<JobInProgress>(
 			new Comparator<JobInProgress>() {
 				private int translatePriority(JobPriority priority) {
 					switch (priority) {
@@ -139,7 +138,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 				}
 			});
 
-	private AtomicInteger job_counts;
 	private Queue<JobInProgress> initialize_queue;
 	private Thread async_initialize_thread;
 
@@ -178,6 +176,13 @@ public class RoundRobinScheduler extends TaskScheduler {
 									try {
 										RoundRobinScheduler.this.taskTrackerManager
 												.initJob(job);
+
+										if (!RoundRobinScheduler.this.jobs
+												.add(job)) {
+											RoundRobinScheduler.LOGGER
+													.error("fail to register job:"
+															+ job.getJobID());
+										}
 									} catch (Exception e) {
 										RoundRobinScheduler.LOGGER.error(
 												"fail to initialize job:"
@@ -211,8 +216,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 			this.async_initialize_thread.start();
 		}
 
-		this.job_counts = new AtomicInteger(0);
-
 		RoundRobinScheduler.LOGGER.info("start round robin scheduler");
 		this.taskTrackerManager
 				.addJobInProgressListener(new JobInProgressListener() {
@@ -240,12 +243,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 					@Override
 					public void jobRemoved(JobInProgress job) {
 						RoundRobinScheduler.LOGGER.info("remove job	" + job);
-						if (RoundRobinScheduler.this.jobs.remove(job)) {
-							// decrease it later,as it will not make any serious
-							// problem if fail
-							RoundRobinScheduler.this.job_counts
-									.decrementAndGet();
-						}
+						RoundRobinScheduler.this.jobs.remove(job);
 					}
 
 					@Override
@@ -253,17 +251,17 @@ public class RoundRobinScheduler extends TaskScheduler {
 							throws IOException {
 						RoundRobinScheduler.LOGGER.info("add job " + job);
 						if (job != null) {
-							if (!initialize_queue.offer(job)) {
+							if (!RoundRobinScheduler.this.initialize_queue
+									.offer(job)) {
 								// queue fail,switch back to sync initialize
 								RoundRobinScheduler.this.taskTrackerManager
 										.initJob(job);
-							}
 
-							if (RoundRobinScheduler.this.jobs.add(job)) {
-								// increase later,as CAS operation may cause
-								// contention
-								RoundRobinScheduler.this.job_counts
-										.incrementAndGet();
+								if (!RoundRobinScheduler.this.jobs.add(job)) {
+									RoundRobinScheduler.LOGGER
+											.error("fail to register job:"
+													+ job.getJobID());
+								}
 							}
 						}
 					}
@@ -275,6 +273,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 * 
 	 * @see org.apache.hadoop.mapred.TaskScheduler#terminate()
 	 */
+	@Override
 	public void terminate() throws IOException {
 		// terminate async init thread
 		this.initialize_queue = null;
@@ -287,11 +286,9 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public List<Task> assignTasks(TaskTracker tasktracker) throws IOException {
 		// easy case,no jobs
-		int current_count = this.job_counts.get();
-		if (current_count <= 0) {
+		if (this.jobs.first() == null) {
 			RoundRobinScheduler.LOGGER
-					.info("assign null,as the job tracking counter indicate no jobs,counter:"
-							+ current_count);
+					.info("assign null,as the job tracking counter indicate no jobs");
 			return RoundRobinScheduler.EMPTY_TASK_LIST;
 		}
 
