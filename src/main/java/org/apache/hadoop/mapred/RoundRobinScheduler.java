@@ -177,6 +177,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 									RoundRobinScheduler.LOGGER.error(
 											"fail to initialize job:"
 													+ job.getJobID(), e);
+									continue;
 								}
 							} else {
 								RoundRobinScheduler.LOGGER
