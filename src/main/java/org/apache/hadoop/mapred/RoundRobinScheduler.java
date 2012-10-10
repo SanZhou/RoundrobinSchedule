@@ -64,7 +64,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 	 * @author <a href="mailto:zhizhong.qiu@happyelements.com">kevin</a>
 	 */
 	public static enum TaskSelector {
-		LocalMap, RackMap, Map, Reduce;
+		Map, Reduce;
 
 		/**
 		 * select a task accroding self type
@@ -84,15 +84,8 @@ public class RoundRobinScheduler extends TaskScheduler {
 		Task select(JobInProgress job, TaskTrackerStatus status,
 				int cluster_size, int uniq_hosts) throws IOException {
 			switch (this) {
-			case LocalMap:
-				return job.obtainNewNodeLocalMapTask(status, cluster_size,
-						uniq_hosts);
-			case RackMap:
-				return job.obtainNewNodeOrRackLocalMapTask(status,
-						cluster_size, uniq_hosts);
 			case Map:
-				return job.obtainNewNonLocalMapTask(status, cluster_size,
-						uniq_hosts);
+				return job.obtainNewMapTask(status, cluster_size, uniq_hosts);
 			case Reduce:
 				return job.getStatus().mapProgress() > job.getJobConf()
 						.getFloat("mapred.reduce.slowstart.completed.maps",
@@ -242,7 +235,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 		// kick start capacity
 		if (map_capacity > 0) {
-			selector = TaskSelector.LocalMap;
+			selector = TaskSelector.Map;
 			capacity = map_capacity;
 		} else if (reduce_capacity > 0) {
 			selector = TaskSelector.Reduce;
@@ -318,12 +311,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 
 				// loop back,switch to next level,and retry
 				switch (selector) {
-				case LocalMap:
-					selector = TaskSelector.RackMap;
-					break;
-				case RackMap:
-					selector = TaskSelector.Map;
-					break;
 				case Map:
 					selector = TaskSelector.Reduce;
 					// switch capacity to reduce capacity
