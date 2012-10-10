@@ -34,10 +34,13 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.LockSupport;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -137,6 +140,7 @@ public class RoundRobinScheduler extends TaskScheduler {
 			});
 
 	private AtomicInteger job_counts;
+	private Queue<JobInProgress> initialize_queue;
 
 	/**
 	 * {@inheritDoc}
@@ -146,6 +150,58 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public void start() throws IOException {
 		super.start();
+
+		// start async init
+		this.initialize_queue = new ConcurrentLinkedQueue<JobInProgress>();
+		new Thread("async-initialize-job") {
+
+			@Override
+			public void run() {
+				for (;;) {
+					try {
+						Queue<JobInProgress> queue = RoundRobinScheduler.this.initialize_queue;
+						if (queue == null) {
+							RoundRobinScheduler.LOGGER
+									.info("no queue found,quit job async initialize thread");
+							break;
+						}
+
+						Iterator<JobInProgress> iterator = queue.iterator();
+						while (iterator.hasNext()) {
+							JobInProgress job = iterator.next();
+							if (job != null) {
+								try {
+									RoundRobinScheduler.this.taskTrackerManager
+											.initJob(job);
+								} catch (Exception e) {
+									RoundRobinScheduler.LOGGER.error(
+											"fail to initialize job:"
+													+ job.getJobID(), e);
+								}
+							} else {
+								RoundRobinScheduler.LOGGER
+										.warn("get null job in progress in job async initialize thread");
+							}
+
+							iterator.remove();
+						}
+
+						// pause for a while
+						LockSupport.parkNanos(1000000000L);
+					} catch (Throwable e) {
+						RoundRobinScheduler.LOGGER
+								.warn("unexpcted error for job async initialzie thread,resume",
+										e);
+					}
+				}
+			}
+
+			@Override
+			public void start() {
+				this.setDaemon(true);
+				super.start();
+			}
+		}.start();
 
 		this.job_counts = new AtomicInteger(0);
 
@@ -189,8 +245,12 @@ public class RoundRobinScheduler extends TaskScheduler {
 							throws IOException {
 						RoundRobinScheduler.LOGGER.info("add job " + job);
 						if (job != null) {
-							RoundRobinScheduler.this.taskTrackerManager
-									.initJob(job);
+							if (!initialize_queue.offer(job)) {
+								// queue fail,switch back to sync initialize
+								RoundRobinScheduler.this.taskTrackerManager
+										.initJob(job);
+							}
+
 							if (RoundRobinScheduler.this.jobs.add(job)) {
 								// increase later,as CAS operation may cause
 								// contention
