@@ -35,11 +35,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.NoSuchElementException;
-import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.locks.LockSupport;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -138,9 +135,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 				}
 			});
 
-	private Queue<JobInProgress> initialize_queue;
-	private Thread async_initialize_thread;
-
 	/**
 	 * {@inheritDoc}
 	 * 
@@ -149,72 +143,6 @@ public class RoundRobinScheduler extends TaskScheduler {
 	@Override
 	public void start() throws IOException {
 		super.start();
-
-		// initialize queue
-		this.initialize_queue = new ConcurrentLinkedQueue<JobInProgress>();
-
-		// start or create if needed
-		if (this.async_initialize_thread == null
-				|| !this.async_initialize_thread.isAlive()) {
-			this.async_initialize_thread = new Thread("async-initialize-job") {
-
-				@Override
-				public void run() {
-					for (;;) {
-						try {
-							Queue<JobInProgress> queue = RoundRobinScheduler.this.initialize_queue;
-							if (queue == null) {
-								RoundRobinScheduler.LOGGER
-										.info("no queue found,quit job async initialize thread");
-								break;
-							}
-
-							Iterator<JobInProgress> iterator = queue.iterator();
-							while (iterator.hasNext()) {
-								JobInProgress job = iterator.next();
-								if (job != null) {
-									try {
-										RoundRobinScheduler.this.taskTrackerManager
-												.initJob(job);
-
-										if (!RoundRobinScheduler.this.jobs
-												.add(job)) {
-											RoundRobinScheduler.LOGGER
-													.error("fail to register job:"
-															+ job.getJobID());
-										}
-									} catch (Exception e) {
-										RoundRobinScheduler.LOGGER.error(
-												"fail to initialize job:"
-														+ job.getJobID(), e);
-										continue;
-									}
-								} else {
-									RoundRobinScheduler.LOGGER
-											.warn("get null job in progress in job async initialize thread");
-								}
-
-								iterator.remove();
-							}
-
-							// pause for a while
-							LockSupport.parkNanos(1000000000L);
-						} catch (Throwable e) {
-							RoundRobinScheduler.LOGGER
-									.warn("unexpcted error for job async initialzie thread,resume",
-											e);
-						}
-					}
-				}
-
-				@Override
-				public void start() {
-					this.setDaemon(true);
-					super.start();
-				}
-			};
-			this.async_initialize_thread.start();
-		}
 
 		RoundRobinScheduler.LOGGER.info("start round robin scheduler");
 		this.taskTrackerManager
@@ -251,33 +179,17 @@ public class RoundRobinScheduler extends TaskScheduler {
 							throws IOException {
 						RoundRobinScheduler.LOGGER.info("add job " + job);
 						if (job != null) {
-							if (!RoundRobinScheduler.this.initialize_queue
-									.offer(job)) {
-								// queue fail,switch back to sync initialize
-								RoundRobinScheduler.this.taskTrackerManager
-										.initJob(job);
+							RoundRobinScheduler.this.taskTrackerManager
+									.initJob(job);
 
-								if (!RoundRobinScheduler.this.jobs.add(job)) {
-									RoundRobinScheduler.LOGGER
-											.error("fail to register job:"
-													+ job.getJobID());
-								}
+							if (!RoundRobinScheduler.this.jobs.add(job)) {
+								RoundRobinScheduler.LOGGER
+										.error("fail to register job:"
+												+ job.getJobID());
 							}
 						}
 					}
 				});
-	}
-
-	/**
-	 * {@inheritDoc}
-	 * 
-	 * @see org.apache.hadoop.mapred.TaskScheduler#terminate()
-	 */
-	@Override
-	public void terminate() throws IOException {
-		// terminate async init thread
-		this.initialize_queue = null;
-		super.terminate();
 	}
 
 	/**
